@@ -46,3 +46,12 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -Run
 - 当前版本只接管主显示器。
 - 托盘基于 [ManagedShell](https://github.com/cairoshell/ManagedShell)（MIT），它会在本进程注册一个 `Shell_TrayWnd` 接收托盘消息，并同时转发给 Explorer。
 - 桌面雨层按"填充"方式绘制壁纸，如壁纸使用"适应/平铺"可能有轻微差异。
+
+## 环境要求
+
+- Windows 11（Windows 10 2004 及以上也可，真玻璃需要 `WDA_EXCLUDEFROMCAPTURE`）
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
+
+## 许可
+
+[MIT](LICENSE)。第三方组件：[ManagedShell](https://github.com/cairoshell/ManagedShell)（MIT）。
