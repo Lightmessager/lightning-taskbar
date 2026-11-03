@@ -34,7 +34,13 @@ public partial class App : Application
         }
 
         _single = new Mutex(true, "LightningTaskbar.SingleInstance", out bool first);
-        if (!first) { Shutdown(); return; }
+        if (!first)
+        {
+            // 已经在运行：让那边的任务栏弹出来，否则双击快捷方式看起来像“没反应”
+            try { if (EventWaitHandle.TryOpenExisting(ShowSignalName, out var signal)) signal.Set(); } catch { }
+            Shutdown();
+            return;
+        }
 
         // 任何崩溃都必须把系统任务栏还回去
         AppDomain.CurrentDomain.UnhandledException += (_, args) => { Log(args.ExceptionObject); Cleanup(); };
@@ -57,7 +63,9 @@ public partial class App : Application
         ShellTaskbar.Hide();
         StartMenu = new StartMenu.StartMenuWindow();
         _winHook = new StartMenu.WinKeyHook(() => StartMenu.Toggle());
-        new TaskbarWindow().Show();
+        var bar = new TaskbarWindow();
+        bar.Show();
+        ListenForShowSignal(bar);
     }
 
     /// <summary>崩溃原因写到 %AppData%\LightningTaskbar\error.log，方便排查。</summary>
@@ -70,6 +78,19 @@ public partial class App : Application
             System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "error.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {error}{Environment.NewLine}{Environment.NewLine}");
         }
         catch { }
+    }
+
+    const string ShowSignalName = "LightningTaskbar.Show";
+
+    /// <summary>再次启动程序时（如双击快捷方式），第二个进程会触发这个信号。</summary>
+    void ListenForShowSignal(TaskbarWindow bar)
+    {
+        var signal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowSignalName);
+        var thread = new Thread(() =>
+        {
+            while (signal.WaitOne()) Dispatcher.BeginInvoke(bar.Reveal);
+        }) { IsBackground = true, Name = "ShowSignal" };
+        thread.Start();
     }
 
     bool _cleaned;

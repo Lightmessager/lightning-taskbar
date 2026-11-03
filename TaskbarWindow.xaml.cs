@@ -26,7 +26,10 @@ public partial class TaskbarWindow : Window
     // 以下均为玻璃本体（不含投影边）的物理像素坐标
     int _barW, _barH, _shownY, _hiddenY, _x, _pad, _lastY = int.MinValue;
     double _shown = 0;               // 0 = 隐藏，1 = 显示
-    DateTime _lastWanted = DateTime.Now, _edgeSince = DateTime.MaxValue;
+    DateTime _lastWanted = DateTime.Now, _edgeSince = DateTime.MaxValue, _revealUntil = DateTime.MinValue;
+
+    /// <summary>把任务栏弹出来停留几秒（程序被再次启动时调用）。</summary>
+    public void Reveal() => _revealUntil = DateTime.Now.AddSeconds(3);
     int _openMenus;
 
     static App AppInstance => (App)Application.Current;
@@ -205,7 +208,7 @@ public partial class TaskbarWindow : Window
         // 全屏（游戏/视频）时需要在底边停留一下才呼出，避免误触
         bool edgeReveal = atEdge && (state != FgState.Fullscreen || (now - _edgeSince).TotalMilliseconds > 350);
 
-        bool want = overBar || edgeReveal || _openMenus > 0 || PeekOpen || TrayPopup.IsOpen || ImePopup.IsOpen || AppInstance.StartMenu.IsVisible || state == FgState.Clear;
+        bool want = overBar || edgeReveal || now < _revealUntil || _openMenus > 0 || PeekOpen || TrayPopup.IsOpen || ImePopup.IsOpen || AppInstance.StartMenu.IsVisible || state == FgState.Clear;
         if (want) _lastWanted = now;
         double target = want || (now - _lastWanted).TotalMilliseconds < 800 ? 1 : 0;
 
