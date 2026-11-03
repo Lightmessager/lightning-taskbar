@@ -207,7 +207,8 @@
                                     <Setter.Value><DropShadowEffect Color="#9CC0FF" BlurRadius="8" ShadowDepth="0" Opacity="0.9"/></Setter.Value>
                                 </Setter>
                             </DataTrigger>
-                            <DataTrigger Binding="{Binding IsGroup}" Value="True">
+                            <!-- 运行中的应用用悬停预览代替 tooltip -->
+                            <DataTrigger Binding="{Binding IsRunning}" Value="True">
                                 <Setter TargetName="TaskButton" Property="ToolTipService.IsEnabled" Value="False"/>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsMinimized}" Value="True">
@@ -218,7 +219,7 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <!-- 多窗口应用的悬停预览：实时缩略图，Q 弹展开 -->
+            <!-- 运行中应用的悬停预览：实时缩略图（多窗口并排），Q 弹展开 -->
             <Popup x:Name="PeekPopup" Placement="Custom" AllowsTransparency="True" StaysOpen="True" Focusable="False">
                 <!-- 外圈透明留白：给回弹时的超出部分和阴影留位置 -->
                 <Border x:Name="PeekRoot" Padding="18,18,18,26" Background="Transparent"

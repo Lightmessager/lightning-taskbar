@@ -19,7 +19,7 @@ public sealed class PeekItem
 }
 
 /// <summary>
-/// 多窗口应用的悬停预览：鼠标停在合并图标上，弹出该应用全部窗口的实时缩略图（DWM 缩略图），
+/// 悬停预览：鼠标停在运行中的应用图标上，弹出该应用全部窗口的实时缩略图（DWM 缩略图，多窗口时并排），
 /// 弹出时带回弹动画，点卡片切换到对应窗口。
 /// </summary>
 public partial class TaskbarWindow
@@ -51,7 +51,7 @@ public partial class TaskbarWindow
     {
         if (((FrameworkElement)sender).DataContext is not TaskItem t) return;
         _peekClose.Stop();
-        if (!t.IsGroup || _openMenus > 0)
+        if (!t.IsRunning || _openMenus > 0)
         {
             _peekOpen.Stop();
             if (PeekOpen) _peekClose.Start();
@@ -83,7 +83,7 @@ public partial class TaskbarWindow
     /// <param name="bounce">回弹幅度：1 = 从小弹出，0 = 无动画。</param>
     void ShowPeek(TaskItem item, FrameworkElement anchor, double bounce)
     {
-        if (item == null || anchor == null || !item.IsGroup) { HidePeek(); return; }
+        if (item == null || anchor == null || item.WindowCount == 0) { HidePeek(); return; }
         ClearThumbs();
         _peekTarget = item;
         _peekAnchor = anchor;
@@ -135,7 +135,7 @@ public partial class TaskbarWindow
         if (((FrameworkElement)sender).DataContext is not PeekItem p) return;
         WindowTracker.Close(p.Handle);
 
-        // 等窗口真正关掉再刷新：剩一个窗口时预览就没必要了
+        // 等窗口真正关掉再刷新：窗口全关了就收起预览
         var target = _peekTarget;
         var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
         t.Tick += (_, _) =>
@@ -143,7 +143,7 @@ public partial class TaskbarWindow
             t.Stop();
             _tracker.Refresh();
             if (_peekTarget != target) return;
-            if (target.IsGroup) ShowPeek(target, _peekAnchor, bounce: 0);
+            if (target.WindowCount > 0) ShowPeek(target, _peekAnchor, bounce: 0);
             else HidePeek();
         };
         t.Start();
