@@ -13,7 +13,7 @@ namespace LightningTaskbar.StartMenu;
 public partial class StartMenuWindow : Window
 {
     List<AppEntry> _all = new();
-    List<AppEntry> _pinned = new();
+    List<AppEntry> _pinned = new(), _systemPinned = new();
     bool _loaded, _showAll, _syncing;
     int _iconSize = 48;
     IntPtr _hwnd;
@@ -87,12 +87,97 @@ public partial class StartMenuWindow : Window
         {
             var pinned = await AppCatalog.LoadPinnedAsync(_all);
             if (pinned == null) return;
-            _pinned = pinned;
-            AppCatalog.LoadIconsAsync(_pinned, Dispatcher, _iconSize);
-            ApplyFilter();
+            _systemPinned = pinned;
+            RebuildPinned();
         }
         finally { _syncing = false; }
     }
+
+    /// <summary>
+    /// 已固定 = Windows 的固定项 − 在这里取消固定的 + 在这里固定的。
+    /// Windows 只允许资源管理器自己改开始菜单（第三方调用返回拒绝访问），所以这份差异存在我们的设置里，不动系统布局。
+    /// </summary>
+    void RebuildPinned()
+    {
+        var s = WeatherEngine.Instance.Settings;
+        var list = _systemPinned.Where(a => !s.StartHidden.Contains(a.ParsingName)).ToList();
+        foreach (var id in s.StartAdded)
+        {
+            var app = _all.FirstOrDefault(a => a.ParsingName == id);
+            if (app != null && !list.Contains(app)) list.Add(app);
+        }
+        _pinned = list;
+        AppCatalog.LoadIconsAsync(_pinned, Dispatcher, _iconSize);
+        ApplyFilter();
+    }
+
+    // ---------------- 应用右键菜单 ----------------
+
+    static AppEntry EntryOf(object sender) => ((FrameworkElement)sender).DataContext as AppEntry;
+
+    void AppMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        var menu = (ContextMenu)sender;
+        if (menu.DataContext is not AppEntry a) return;
+        var exe = AppCatalog.ResolveExe(a.ParsingName);
+        bool file = exe != null && System.IO.File.Exists(exe);
+        foreach (var mi in menu.Items.OfType<MenuItem>())
+        {
+            switch ((string)mi.Tag)
+            {
+                case "admin": mi.Visibility = file && !AppCatalog.IsPackaged(a.ParsingName) ? Visibility.Visible : Visibility.Collapsed; break;
+                case "location": mi.Visibility = file ? Visibility.Visible : Visibility.Collapsed; break;
+                case "pinStart": mi.Header = _pinned.Contains(a) ? "从“开始”取消固定" : "固定到“开始”"; break;
+                case "pinBar": mi.Header = AppInstance.Bar.Tracker.IsAppPinned(a) ? "从任务栏取消固定" : "固定到任务栏"; break;
+            }
+        }
+    }
+
+    static App AppInstance => (App)Application.Current;
+
+    void AppOpen_Click(object sender, RoutedEventArgs e) { if (EntryOf(sender) is { } a) Launch(a); }
+
+    void AppAdmin_Click(object sender, RoutedEventArgs e)
+    {
+        if (EntryOf(sender) is not { } a) return;
+        Close2();
+        try { Process.Start(new ProcessStartInfo(AppCatalog.ResolveExe(a.ParsingName)) { UseShellExecute = true, Verb = "runas" }); }
+        catch (Exception ex) { Debug.WriteLine(ex); }   // 用户在 UAC 里点了“否”
+    }
+
+    void AppPinStart_Click(object sender, RoutedEventArgs e)
+    {
+        if (EntryOf(sender) is not { } a) return;
+        var s = WeatherEngine.Instance.Settings;
+        if (_pinned.Contains(a))
+        {
+            s.StartAdded.Remove(a.ParsingName);
+            if (_systemPinned.Contains(a) && !s.StartHidden.Contains(a.ParsingName)) s.StartHidden.Add(a.ParsingName);
+        }
+        else
+        {
+            s.StartHidden.Remove(a.ParsingName);
+            if (!_systemPinned.Contains(a) && !s.StartAdded.Contains(a.ParsingName)) s.StartAdded.Add(a.ParsingName);
+        }
+        s.Save();
+        RebuildPinned();
+    }
+
+    void AppPinBar_Click(object sender, RoutedEventArgs e)
+    {
+        if (EntryOf(sender) is { } a) AppInstance.Bar.Tracker.ToggleAppPin(a);
+    }
+
+    void AppLocation_Click(object sender, RoutedEventArgs e)
+    {
+        if (EntryOf(sender) is not { } a) return;
+        Close2();
+        try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{AppCatalog.ResolveExe(a.ParsingName)}\"") { UseShellExecute = true }); }
+        catch (Exception ex) { Debug.WriteLine(ex); }
+    }
+
+    /// <summary>和系统一样交给“已安装的应用”页面，由用户在那里确认，不在这里直接卸载。</summary>
+    void AppUninstall_Click(object sender, RoutedEventArgs e) { Close2(); Shell("ms-settings:appsfeatures"); }
 
     void ViewToggle_Click(object sender, RoutedEventArgs e)
     {
@@ -104,10 +189,8 @@ public partial class StartMenuWindow : Window
     {
         double scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
         var mon = Native.GetPrimaryMonitorRect();
-        var s = WeatherEngine.Instance.Settings;
         int w = (int)(Width * scale), h = (int)(Height * scale);
-        int x = mon.Left + (int)(14 * scale);
-        int y = mon.Bottom - (int)((8 + s.BarHeight + 12) * scale) - h;
+        var (x, y) = AppInstance.Bar.MenuPosition(w, h, scale, mon);
         Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, x, y, w, h, Native.SWP_SHOWWINDOW);
     }
 

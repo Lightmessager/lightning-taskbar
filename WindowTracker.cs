@@ -81,6 +81,9 @@ internal sealed class WindowTracker
 
     static Settings Settings => WeatherEngine.Instance.Settings;
 
+    /// <summary>取图标的像素尺寸：Dock 放大后也要清晰。</summary>
+    const int IconPx = 128;
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     static extern uint PrivateExtractIcons(string file, int index, int cx, int cy, IntPtr[] icons, int[] ids, uint count, uint flags);
 
@@ -138,6 +141,30 @@ internal sealed class WindowTracker
         else Pin(item.ProcessPath);
     }
 
+    const string ShellAppPrefix = "shell:AppsFolder\\";
+
+    /// <summary>开始菜单里的应用是否已固定到任务栏（同一 exe 的快捷方式也算）。</summary>
+    public bool IsAppPinned(StartMenu.AppEntry app) => MatchingPins(app).Any();
+
+    public void ToggleAppPin(StartMenu.AppEntry app)
+    {
+        var existing = MatchingPins(app).ToList();
+        if (existing.Count > 0) Settings.Pinned.RemoveAll(existing.Contains);
+        else
+        {
+            Settings.Pinned.Add(app.ShellTarget);
+            Settings.PinTitles[app.ShellTarget] = app.Name;
+        }
+        Settings.Save();
+        Refresh();
+    }
+
+    IEnumerable<string> MatchingPins(StartMenu.AppEntry app)
+    {
+        var exe = ResolvePinTarget(app.ShellTarget);
+        return Settings.Pinned.Where(p => string.Equals(p, app.ShellTarget, StringComparison.OrdinalIgnoreCase) || SameExe(exe, ResolvePinTarget(p)));
+    }
+
     bool SamePin(string pin, string exe) =>
         string.Equals(pin, exe, StringComparison.OrdinalIgnoreCase) || SameExe(exe, ResolvePinTarget(pin));
 
@@ -146,7 +173,9 @@ internal sealed class WindowTracker
     {
         if (_pinTargets.TryGetValue(pin, out var t)) return t;
         t = pin;
-        if (pin.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+        if (pin.StartsWith(ShellAppPrefix, StringComparison.OrdinalIgnoreCase))
+            t = StartMenu.AppCatalog.ResolveExe(pin.Substring(ShellAppPrefix.Length));
+        else if (pin.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
         {
             var info = Shortcut.Read(pin);
             // 没有目标的外壳快捷方式（如“文件资源管理器”）退而用图标所在的 exe 来匹配
@@ -292,7 +321,8 @@ internal sealed class WindowTracker
         return "app:" + FinalPath(path);
     }
 
-    static string PinTitle(string pin) => Path.GetFileNameWithoutExtension(pin);
+    static string PinTitle(string pin) =>
+        Settings.PinTitles.TryGetValue(pin, out var title) ? title : Path.GetFileNameWithoutExtension(pin);
 
     TaskItem CreateWindowItem(string key, IntPtr h)
     {
@@ -304,14 +334,17 @@ internal sealed class WindowTracker
     {
         var target = ResolvePinTarget(pin);
         ImageSource icon = null;
-        if (pin.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+        if (pin.StartsWith(ShellAppPrefix, StringComparison.OrdinalIgnoreCase))
+            icon = StartMenu.AppCatalog.GetIcon(pin, IconPx);
+        else if (pin.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
         {
             // 优先用快捷方式自己指定的图标（网页应用等），不带快捷方式小箭头
             var info = Shortcut.Read(pin);
             if (info.IconPath != null && File.Exists(info.IconPath)) icon = ExtractLarge(info.IconPath, info.IconIndex);
         }
-        icon ??= (target != null && File.Exists(target) ? ExtractLarge(target) : null) ?? ShellIcon(pin);
-        return new TaskItem { Key = key, ProcessPath = target, Title = Path.GetFileNameWithoutExtension(pin), Icon = icon };
+        icon ??= (target != null && File.Exists(target) ? ExtractLarge(target) : null)
+                 ?? StartMenu.AppCatalog.GetIcon(pin, IconPx) ?? ShellIcon(pin);
+        return new TaskItem { Key = key, ProcessPath = target, Title = PinTitle(pin), Icon = icon };
     }
 
     bool IsTaskWindow(IntPtr h)
@@ -361,7 +394,7 @@ internal sealed class WindowTracker
         {
             var icons = new IntPtr[1];
             var ids = new int[1];
-            if (PrivateExtractIcons(path, index, 64, 64, icons, ids, 1, 0) != 0 && icons[0] != IntPtr.Zero)
+            if (PrivateExtractIcons(path, index, IconPx, IconPx, icons, ids, 1, 0) != 0 && icons[0] != IntPtr.Zero)
             {
                 try { result = Freeze(Imaging.CreateBitmapSourceFromHIcon(icons[0], Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions())); }
                 finally { Native.DestroyIcon(icons[0]); }

@@ -11,6 +11,9 @@ public partial class App : Application
     internal DesktopLayer Desktop { get; private set; }
     internal TrayHost Tray { get; private set; }
     internal StartMenu.StartMenuWindow StartMenu { get; private set; }
+    internal TaskbarWindow Bar { get; private set; }
+    internal Notifications.NotificationCenter Notifications { get; private set; }
+    AppearanceWindow _appearance;
     StartMenu.WinKeyHook _winHook;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -53,6 +56,7 @@ public partial class App : Application
         if (e.Args.Contains("--rain")) settings.Mode = WeatherMode.Rain;
         if (e.Args.Contains("--storm")) settings.Mode = WeatherMode.Storm;
         WeatherEngine.Instance.Start(settings);
+        Glass.GlassSurface.AllowCapture = settings.AllowScreenshots;
 
         Audio = new StormAudio();
         Desktop = new DesktopLayer();
@@ -64,8 +68,19 @@ public partial class App : Application
         StartMenu = new StartMenu.StartMenuWindow();
         _winHook = new StartMenu.WinKeyHook(() => StartMenu.Toggle());
         var bar = new TaskbarWindow();
+        Bar = bar;
         bar.Show();
         ListenForShowSignal(bar);
+        Notifications = new Notifications.NotificationCenter();
+        Notifications.Start();
+    }
+
+    internal bool AppearanceOpen => _appearance?.IsVisible == true;
+
+    internal void ShowAppearance()
+    {
+        _appearance ??= new AppearanceWindow();
+        _appearance.Open();
     }
 
     /// <summary>崩溃原因写到 %AppData%\LightningTaskbar\error.log，方便排查。</summary>
@@ -99,6 +114,7 @@ public partial class App : Application
         if (_cleaned) return;
         _cleaned = true;
         try { _winHook?.Dispose(); } catch { }
+        try { Notifications?.Dispose(); } catch { }
         ShellTaskbar.Restore();
         try { Desktop?.Dispose(); } catch { }
         try { Audio?.Dispose(); } catch { }

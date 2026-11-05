@@ -81,6 +81,50 @@ internal static class AppCatalog
     }
 
     /// <summary>
+    /// 把“所有应用”里的解析名解析成 exe 路径，用于以管理员运行、打开文件位置、与运行中的窗口匹配。
+    /// 需要在 STA 线程调用。取不到时返回 null。
+    /// </summary>
+    public static string ResolveExe(string parsingName)
+    {
+        if (string.IsNullOrEmpty(parsingName)) return null;
+        if (Path.IsPathRooted(parsingName))
+        {
+            if (!parsingName.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) return parsingName;
+            return Shortcut.Read(parsingName).Target;
+        }
+        try
+        {
+            dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!);
+            dynamic folder = shell.NameSpace("shell:::{4234d49b-0245-4df3-b780-3893943456e1}");
+            dynamic item = folder.ParseName(parsingName);
+            string target = item == null ? null : item.ExtendedProperty("System.Link.TargetParsingPath") as string;
+            if (!string.IsNullOrEmpty(target)) return target;
+        }
+        catch (Exception ex) { Debug.WriteLine(ex); }
+        return IsPackaged(parsingName) ? PackagedExe(parsingName) : null;
+    }
+
+    /// <summary>商店 / MSIX 应用的 AUMID 形如 家族名!应用ID。</summary>
+    public static bool IsPackaged(string parsingName) =>
+        !string.IsNullOrEmpty(parsingName) && !Path.IsPathRooted(parsingName) && parsingName.Contains('!');
+
+    static string PackagedExe(string aumid)
+    {
+        try
+        {
+            var parts = aumid.Split('!');
+            var pkg = new global::Windows.Management.Deployment.PackageManager().FindPackagesForUser("", parts[0]).FirstOrDefault();
+            if (pkg == null) return null;
+            string root = pkg.InstalledLocation.Path;
+            var app = System.Xml.Linq.XDocument.Load(Path.Combine(root, "AppxManifest.xml")).Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "Application" && (string)e.Attribute("Id") == parts[1]);
+            var exe = (string)app?.Attribute("Executable");
+            return exe == null ? null : Path.Combine(root, exe);
+        }
+        catch (Exception ex) { Debug.WriteLine(ex); return null; }
+    }
+
+    /// <summary>
     /// 读取 Windows 开始菜单“已固定”的应用（顺序一致）。用系统自带的 Export-StartLayout 导出 JSON，
     /// 再尽量映射到“所有应用”里的同一项，以便复用名称与图标。
     /// </summary>
@@ -158,7 +202,7 @@ internal static class AppCatalog
     [StructLayout(LayoutKind.Sequential)]
     struct BITMAPINFOHEADER { public int biSize, biWidth, biHeight; public short biPlanes, biBitCount; public int biCompression, biSizeImage, biXPelsPerMeter, biYPelsPerMeter, biClrUsed, biClrImportant; }
 
-    static ImageSource GetIcon(string parsingName, int size)
+    public static ImageSource GetIcon(string parsingName, int size)
     {
         IntPtr hbmp = IntPtr.Zero;
         try

@@ -1,0 +1,241 @@
+<Window x:Class="LightningTaskbar.AppearanceWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:glass="clr-namespace:LightningTaskbar.Glass"
+        Title="Lightning Appearance" Width="400" SizeToContent="Height"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
+        FontFamily="Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI"
+        Deactivated="OnDeactivated" PreviewKeyDown="OnPreviewKeyDown">
+    <Window.Resources>
+        <Style x:Key="Thumb" TargetType="Thumb">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Ellipse Width="16" Height="16" Fill="White">
+                            <Ellipse.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity="0.4"/></Ellipse.Effect>
+                        </Ellipse>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="TrackFill" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Grid Background="Transparent">
+                            <Border Height="4" CornerRadius="2" Background="{TemplateBinding Background}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="Slider">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="IsMoveToPointEnabled" Value="True"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Track x:Name="PART_Track" Height="22">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Style="{StaticResource TrackFill}" Background="#FF8FB4FF" Command="Slider.DecreaseLarge"/>
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Style="{StaticResource TrackFill}" Background="#38FFFFFF" Command="Slider.IncreaseLarge"/>
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource Thumb}"/>
+                            </Track.Thumb>
+                        </Track>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- 分段按钮 / 普通按钮 -->
+        <Style x:Key="Segment" TargetType="RadioButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bg" CornerRadius="9" Padding="0,7" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#18FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#38FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="Action" TargetType="Button">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" CornerRadius="9" Padding="12,7" Background="#18FFFFFF">
+                            <ContentPresenter HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#30FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="Value" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#B3FFFFFF"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid x:Name="Root">
+        <glass:GlassSurface x:Name="GlassBg" CornerRadius="22" Bevel="18" ShadowPad="12"/>
+        <StackPanel Margin="32,26,32,26">
+            <TextBlock Text="外观与通知" Foreground="White" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,14"/>
+
+            <Border CornerRadius="11" Padding="3" Background="#22000000">
+                <UniformGrid Rows="1">
+                    <RadioButton x:Name="ThemeDock" Style="{StaticResource Segment}" Content="悬浮 Dock" GroupName="Theme" Checked="Theme_Changed"/>
+                    <RadioButton x:Name="ThemeClassic" Style="{StaticResource Segment}" Content="经典通栏" GroupName="Theme" Checked="Theme_Changed"/>
+                </UniformGrid>
+            </Border>
+
+            <StackPanel x:Name="PlacementOptions" Margin="0,14,0,0">
+                <TextBlock Foreground="#B3FFFFFF" FontSize="12" Text="Dock 位置" Margin="2,0,0,5"/>
+                <Border CornerRadius="11" Padding="3" Background="#22000000">
+                    <UniformGrid Rows="1">
+                        <RadioButton x:Name="EdgeBottom" Style="{StaticResource Segment}" Content="底部" GroupName="Edge" Checked="Placement_Changed"/>
+                        <RadioButton x:Name="EdgeLeft" Style="{StaticResource Segment}" Content="左侧" GroupName="Edge" Checked="Placement_Changed"/>
+                        <RadioButton x:Name="EdgeRight" Style="{StaticResource Segment}" Content="右侧" GroupName="Edge" Checked="Placement_Changed"/>
+                    </UniformGrid>
+                </Border>
+                <TextBlock Foreground="#B3FFFFFF" FontSize="12" Text="Finder 栏位置" Margin="2,12,0,5"/>
+                <Border CornerRadius="11" Padding="3" Background="#22000000">
+                    <UniformGrid Rows="1">
+                        <RadioButton x:Name="FinderLeft" Style="{StaticResource Segment}" Content="左上角" GroupName="Finder" Checked="Placement_Changed"/>
+                        <RadioButton x:Name="FinderRight" Style="{StaticResource Segment}" Content="右上角" GroupName="Finder" Checked="Placement_Changed"/>
+                    </UniformGrid>
+                </Border>
+                <TextBlock Foreground="#B3FFFFFF" FontSize="12" Text="悬停特效" Margin="2,12,0,5"/>
+                <Border CornerRadius="11" Padding="3" Background="#22000000">
+                    <UniformGrid Rows="1">
+                        <RadioButton x:Name="FxMask" Style="{StaticResource Segment}" Content="光遮罩" GroupName="Fx" Checked="Placement_Changed" ToolTip="图标上掠过一道光，背后泛起图标主色的光晕"/>
+                        <RadioButton x:Name="FxGlow" Style="{StaticResource Segment}" Content="光晕" GroupName="Fx" Checked="Placement_Changed" ToolTip="只有背后的光晕"/>
+                        <RadioButton x:Name="FxSpot" Style="{StaticResource Segment}" Content="聚光" GroupName="Fx" Checked="Placement_Changed" ToolTip="其余图标暗下去，只亮鼠标所在的"/>
+                        <RadioButton x:Name="FxBounce" Style="{StaticResource Segment}" Content="弹跳" GroupName="Fx" Checked="Placement_Changed" ToolTip="图标轻轻跳两下"/>
+                        <RadioButton x:Name="FxNone" Style="{StaticResource Segment}" Content="无" GroupName="Fx" Checked="Placement_Changed"/>
+                    </UniformGrid>
+                </Border>
+            </StackPanel>
+
+            <Grid x:Name="DockOptions" Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="46"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="36"/>
+                    <RowDefinition Height="36"/>
+                    <RowDefinition Height="36"/>
+                    <RowDefinition Height="36"/>
+                    <RowDefinition Height="36"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Style="{StaticResource Label}" Text="图标大小"/>
+                <Slider x:Name="IconSlider" Grid.Column="1" Minimum="36" Maximum="76" SmallChange="1" LargeChange="4" IsSnapToTickEnabled="True" TickFrequency="1" ValueChanged="Dock_Changed"/>
+                <TextBlock x:Name="IconValue" Grid.Column="2" Style="{StaticResource Value}"/>
+
+                <TextBlock Grid.Row="1" Style="{StaticResource Label}" Text="离边距离"/>
+                <Slider x:Name="LiftSlider" Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="60" SmallChange="1" LargeChange="4" IsSnapToTickEnabled="True" TickFrequency="1" ValueChanged="Dock_Changed"/>
+                <TextBlock x:Name="LiftValue" Grid.Row="1" Grid.Column="2" Style="{StaticResource Value}"/>
+
+                <TextBlock Grid.Row="2" Style="{StaticResource Label}" Text="悬停放大"/>
+                <Slider x:Name="MagnifySlider" Grid.Row="2" Grid.Column="1" Minimum="1" Maximum="1.8" SmallChange="0.05" LargeChange="0.1" IsSnapToTickEnabled="True" TickFrequency="0.05" ValueChanged="Dock_Changed"/>
+                <TextBlock x:Name="MagnifyValue" Grid.Row="2" Grid.Column="2" Style="{StaticResource Value}"/>
+
+                <TextBlock Grid.Row="3" Style="{StaticResource Label}" Text="倒影强度"/>
+                <Slider x:Name="ReflectionSlider" Grid.Row="3" Grid.Column="1" Minimum="0" Maximum="1" SmallChange="0.05" LargeChange="0.1" IsSnapToTickEnabled="True" TickFrequency="0.05" ValueChanged="Dock_Changed"/>
+                <TextBlock x:Name="ReflectionValue" Grid.Row="3" Grid.Column="2" Style="{StaticResource Value}"/>
+
+                <TextBlock Grid.Row="4" Style="{StaticResource Label}" Text="玻璃浓度"/>
+                <Slider x:Name="GlassSlider" Grid.Row="4" Grid.Column="1" Minimum="0" Maximum="1" SmallChange="0.05" LargeChange="0.1" IsSnapToTickEnabled="True" TickFrequency="0.05" ValueChanged="Dock_Changed"/>
+                <TextBlock x:Name="GlassValue" Grid.Row="4" Grid.Column="2" Style="{StaticResource Value}"/>
+            </Grid>
+
+            <Border Height="1" Background="#22FFFFFF" Margin="0,12"/>
+
+            <Grid>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Label}" Text="右上角玻璃通知"/>
+                    <TextBlock x:Name="NotifyState" Foreground="#99FFFFFF" FontSize="11" Margin="0,2,0,0"/>
+                </StackPanel>
+                <CheckBox x:Name="NotifyToggle" HorizontalAlignment="Right" VerticalAlignment="Center" Focusable="False" Cursor="Hand" Click="Notify_Click">
+                    <CheckBox.Template>
+                        <ControlTemplate TargetType="CheckBox">
+                            <Border x:Name="Track" Width="40" Height="22" CornerRadius="11" Background="#38FFFFFF">
+                                <Ellipse x:Name="Knob" Width="16" Height="16" Fill="White" HorizontalAlignment="Left" Margin="3,0"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Track" Property="Background" Value="#FF6C94F5"/>
+                                    <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </CheckBox.Template>
+                </CheckBox>
+            </Grid>
+
+            <Grid Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Label}" Text="允许截图和录屏"/>
+                    <TextBlock Foreground="#99FFFFFF" FontSize="11" Margin="0,2,0,0" Text="开启后能拍到任务栏，但玻璃背景不再实时刷新"/>
+                </StackPanel>
+                <CheckBox x:Name="CaptureToggle" Template="{Binding Template, ElementName=NotifyToggle}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                          Focusable="False" Cursor="Hand" Click="Capture_Click"/>
+            </Grid>
+
+            <TextBlock Foreground="#B3FFFFFF" FontSize="12" Text="通知位置" Margin="2,12,0,5"/>
+            <Border CornerRadius="11" Padding="3" Background="#22000000">
+                <UniformGrid Rows="1">
+                    <RadioButton x:Name="NotifyLeft" Style="{StaticResource Segment}" Content="左上角" GroupName="NotifyCorner" Checked="Placement_Changed"/>
+                    <RadioButton x:Name="NotifyRight" Style="{StaticResource Segment}" Content="右上角" GroupName="NotifyCorner" Checked="Placement_Changed"/>
+                </UniformGrid>
+            </Border>
+
+            <Grid Margin="0,14,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Button Style="{StaticResource Action}" Content="恢复默认外观" Click="Reset_Click"/>
+                <Button Grid.Column="2" Style="{StaticResource Action}" Content="试一条通知" Click="TestNotify_Click"/>
+            </Grid>
+        </StackPanel>
+    </Grid>
+</Window>

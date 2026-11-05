@@ -14,7 +14,14 @@
         <SolidColorBrush x:Key="FgDim" Color="#B3FFFFFF"/>
         <!-- 任务图标尺寸：图标多时由代码压缩 -->
         <sys:Double x:Key="TaskItemWidth">56</sys:Double>
+        <sys:Double x:Key="TaskItemHeight">54</sys:Double>
         <Thickness x:Key="TaskItemMargin">3,0</Thickness>
+        <!-- 以下由 ApplyTheme 按主题改写 -->
+        <sys:Double x:Key="IconSize">32</sys:Double>
+        <sys:Double x:Key="DockReflection">0</sys:Double>
+        <Thickness x:Key="StageMargin">0,11,0,0</Thickness>
+        <ItemsPanelTemplate x:Key="TasksRow"><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+        <ItemsPanelTemplate x:Key="TasksColumnPanel"><StackPanel Orientation="Vertical"/></ItemsPanelTemplate>
 
         <!-- 通用玻璃气泡按钮 -->
         <Style x:Key="GlassButton" TargetType="Button">
@@ -79,6 +86,36 @@
             </Setter>
         </Style>
 
+        <!-- 经典主题的任务按钮 -->
+        <Style x:Key="TaskGlassStyle" TargetType="Button" BasedOn="{StaticResource GlassButton}">
+            <Setter Property="Width" Value="{DynamicResource TaskItemWidth}"/>
+            <Setter Property="Height" Value="{DynamicResource TaskItemHeight}"/>
+            <Setter Property="Margin" Value="{DynamicResource TaskItemMargin}"/>
+        </Style>
+
+        <!-- Dock 主题的任务按钮：没有气泡，反馈全靠图标放大。宽度悬停时由代码逐帧改写 -->
+        <Style x:Key="TaskDockStyle" TargetType="Button">
+            <Setter Property="Width" Value="{DynamicResource TaskItemWidth}"/>
+            <Setter Property="Height" Value="{DynamicResource TaskItemHeight}"/>
+            <Setter Property="Margin" Value="{DynamicResource TaskItemMargin}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid x:Name="Bg" Background="Transparent">
+                            <ContentPresenter/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.7"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 弹出列表里的一行 -->
         <Style x:Key="MenuRow" TargetType="Button">
             <Setter Property="Focusable" Value="False"/>
@@ -105,10 +142,10 @@
 
         <!-- 托盘图标：所有鼠标事件都转发给图标所属的应用 -->
         <DataTemplate x:Key="TrayIconTemplate">
-            <Border x:Name="Bg" Width="34" Height="40" CornerRadius="10" Background="Transparent" ToolTip="{Binding Title}"
+            <Border x:Name="Bg" Width="30" Height="32" CornerRadius="9" Background="Transparent" ToolTip="{Binding Title}"
                     MouseEnter="TrayIcon_MouseEnter" MouseLeave="TrayIcon_MouseLeave" MouseMove="TrayIcon_MouseMove"
                     MouseDown="TrayIcon_MouseDown" MouseUp="TrayIcon_MouseUp">
-                <Image Source="{Binding Icon}" Width="20" Height="20" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <Image Source="{Binding Icon}" Width="18" Height="18" RenderOptions.BitmapScalingMode="HighQuality"/>
             </Border>
             <DataTemplate.Triggers>
                 <Trigger SourceName="Bg" Property="IsMouseOver" Value="True">
@@ -119,6 +156,8 @@
 
         <BooleanToVisibilityConverter x:Key="BoolVis"/>
         <local:InverseBoolVisConverter x:Key="InvBoolVis"/>
+        <!-- 当前主题的任务按钮样式；ApplyTheme 切换 -->
+        <Style x:Key="TaskButtonStyle" TargetType="Button" BasedOn="{StaticResource TaskGlassStyle}"/>
     </Window.Resources>
 
     <Grid x:Name="Root" ClipToBounds="True" AllowDrop="True" Drop="Root_Drop" DragOver="Root_DragOver">
@@ -128,39 +167,67 @@
         <!-- 着色器不可用或关闭“真玻璃”时：系统模糊 + 淡色底 + 细边 -->
         <Border x:Name="FallbackBg" Margin="12" CornerRadius="22" Background="#55101420" BorderThickness="1"
                 BorderBrush="#30FFFFFF" Visibility="Collapsed" IsHitTestVisible="False"/>
+        <!-- 分层窗口里 alpha 为 0 的像素不接收鼠标。这层几乎不可见，保证底座空白处能右键、能拖放，玻璃调到 0 也一样 -->
+        <Border x:Name="BodyHit" Margin="12" Background="#02000000"/>
 
         <!-- ===== 内容 ===== -->
         <Grid x:Name="ContentGrid" Margin="22,12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition x:Name="TasksColumn" Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 开始按钮：闪电徽标 -->
-            <Button x:Name="StartButton" Style="{StaticResource GlassButton}" Width="52" Height="52" ToolTip="开始" Click="Start_Click">
-                <Path Data="M13,2 L4,14 L11,14 L9,22 L20,9 L13,9 Z" Width="24" Height="28" Stretch="Uniform">
-                    <Path.Fill>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Color="#FFFFFFFF" Offset="0"/>
-                            <GradientStop Color="#FFB8D4FF" Offset="0.6"/>
-                            <GradientStop Color="#FF7FA8FF" Offset="1"/>
-                        </LinearGradientBrush>
-                    </Path.Fill>
-                    <Path.Effect>
-                        <DropShadowEffect x:Name="BoltGlow" Color="#9CC0FF" BlurRadius="10" ShadowDepth="0" Opacity="0.6"/>
-                    </Path.Effect>
-                </Path>
+            <!-- 开始按钮：闪电徽标。Dock 主题下和应用图标同尺寸，带底板和倒影 -->
+            <Button x:Name="StartButton" Style="{StaticResource GlassButton}" Width="52" Height="54" ToolTip="开始" Click="Start_Click">
+                <Grid>
+                    <Grid x:Name="StartStage" Width="{DynamicResource IconSize}" Height="{DynamicResource IconSize}" VerticalAlignment="{DynamicResource StageV}" HorizontalAlignment="{DynamicResource StageH}"
+                          Margin="{DynamicResource StageMargin}" RenderTransformOrigin="{DynamicResource StageOrigin}" Background="#02FFFFFF">
+                        <Ellipse x:Name="StartGlow" Margin="-12" Opacity="0" IsHitTestVisible="False"/>
+                        <Border x:Name="StartTile" Visibility="Collapsed" BorderThickness="1" BorderBrush="#50FFFFFF">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#FF4A6BE8" Offset="0"/>
+                                    <GradientStop Color="#FF1F2F86" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                        <Viewbox>
+                            <Grid Width="32" Height="32">
+                                <Path Data="M13,2 L4,14 L11,14 L9,22 L20,9 L13,9 Z" Margin="4,2" Stretch="Uniform">
+                                    <Path.Fill>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                            <GradientStop Color="#FFFFFFFF" Offset="0"/>
+                                            <GradientStop Color="#FFB8D4FF" Offset="0.6"/>
+                                            <GradientStop Color="#FF7FA8FF" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Path.Fill>
+                                    <Path.Effect>
+                                        <DropShadowEffect x:Name="BoltGlow" Color="#9CC0FF" BlurRadius="10" ShadowDepth="0" Opacity="0.6"/>
+                                    </Path.Effect>
+                                </Path>
+                            </Grid>
+                        </Viewbox>
+                        <Rectangle x:Name="StartShine" Opacity="0" IsHitTestVisible="False"/>
+                        <!-- 倒影 -->
+                        <Grid IsHitTestVisible="False" Opacity="{DynamicResource DockReflection}" RenderTransformOrigin="{DynamicResource ReflectOrigin}"
+                              OpacityMask="{DynamicResource ReflectMask}" RenderTransform="{DynamicResource ReflectTransform}">
+                            <Border x:Name="StartTileReflection" Visibility="Collapsed" Background="#FF2B44B0"/>
+                            <Viewbox>
+                                <Grid Width="32" Height="32">
+                                    <Path Data="M13,2 L4,14 L11,14 L9,22 L20,9 L13,9 Z" Margin="4,2" Stretch="Uniform" Fill="#FFD6E4FF"/>
+                                </Grid>
+                            </Viewbox>
+                        </Grid>
+                    </Grid>
+                </Grid>
             </Button>
 
             <!-- 运行中的窗口 -->
             <ItemsControl x:Name="Tasks" Grid.Column="0" Grid.ColumnSpan="3" HorizontalAlignment="Left" VerticalAlignment="Center">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type local:TaskItem}">
-                        <Button x:Name="TaskButton" Style="{StaticResource GlassButton}" Width="{DynamicResource TaskItemWidth}" Height="54" Margin="{DynamicResource TaskItemMargin}"
+                        <Button x:Name="TaskButton" Style="{DynamicResource TaskButtonStyle}"
                                 ToolTip="{Binding Title}" Click="Task_Click" MouseUp="Task_MouseUp"
                                 MouseEnter="Task_MouseEnter" MouseLeave="Task_MouseLeave">
                             <Button.ContextMenu>
@@ -176,25 +243,40 @@
                                               Visibility="{Binding IsGroup, Converter={StaticResource BoolVis}}"/>
                                 </ContextMenu>
                             </Button.ContextMenu>
-                            <Grid Width="{DynamicResource TaskItemWidth}" Height="54">
-                                <Image Source="{Binding Icon}" Width="32" Height="32" RenderOptions.BitmapScalingMode="HighQuality"
-                                       Visibility="{Binding HasIcon, Converter={StaticResource BoolVis}}">
-                                    <Image.Effect><DropShadowEffect BlurRadius="8" ShadowDepth="1.5" Opacity="0.35"/></Image.Effect>
-                                </Image>
-                                <Border Width="32" Height="32" CornerRadius="9" Background="#40FFFFFF"
-                                        Visibility="{Binding HasIcon, Converter={StaticResource InvBoolVis}}">
-                                    <TextBlock Text="{Binding Initial}" Foreground="{DynamicResource Fg}" FontSize="16" FontWeight="SemiBold"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <!-- 同一应用有多个窗口：右上角显示数量 -->
-                                <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,5,4,0" MinWidth="16" Height="16"
-                                        CornerRadius="8" Padding="4,0" Background="#E05B7CFF" BorderBrush="#80FFFFFF" BorderThickness="0.8"
-                                        Visibility="{Binding IsGroup, Converter={StaticResource BoolVis}}">
-                                    <TextBlock Text="{Binding CountText}" Foreground="White" FontSize="10.5" FontWeight="SemiBold"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
+                            <Grid>
+                                <!-- 图标舞台：以底边中点为轴缩放，图标和倒影一起变大 -->
+                                <Grid x:Name="IconStage" Width="{DynamicResource IconSize}" Height="{DynamicResource IconSize}" VerticalAlignment="{DynamicResource StageV}" HorizontalAlignment="{DynamicResource StageH}"
+                                      Margin="{DynamicResource StageMargin}" RenderTransformOrigin="{DynamicResource StageOrigin}" Background="#02FFFFFF">
+                                    <Grid.RenderTransform><ScaleTransform/></Grid.RenderTransform>
+                                    <!-- 悬停特效：图标背后的光晕 -->
+                                    <Ellipse x:Name="Glow" Margin="-12" Opacity="0" IsHitTestVisible="False"/>
+                                    <Image Source="{Binding Icon}" RenderOptions.BitmapScalingMode="HighQuality"
+                                           Visibility="{Binding HasIcon, Converter={StaticResource BoolVis}}">
+                                        <Image.Effect><DropShadowEffect BlurRadius="8" ShadowDepth="1.5" Opacity="0.35"/></Image.Effect>
+                                    </Image>
+                                    <!-- 悬停特效：只落在图标不透明像素上的扫光（遮罩由代码设置） -->
+                                    <Rectangle x:Name="Shine" Opacity="0" IsHitTestVisible="False"/>
+                                    <!-- 倒影 -->
+                                    <Image Source="{Binding Icon}" RenderOptions.BitmapScalingMode="HighQuality" IsHitTestVisible="False"
+                                           Opacity="{DynamicResource DockReflection}" RenderTransformOrigin="{DynamicResource ReflectOrigin}"
+                                           OpacityMask="{DynamicResource ReflectMask}" RenderTransform="{DynamicResource ReflectTransform}"
+                                           Visibility="{Binding HasIcon, Converter={StaticResource BoolVis}}"/>
+                                    <Border CornerRadius="9" Background="#40FFFFFF"
+                                            Visibility="{Binding HasIcon, Converter={StaticResource InvBoolVis}}">
+                                        <TextBlock Text="{Binding Initial}" Foreground="{DynamicResource Fg}" FontSize="16" FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <!-- 同一应用有多个窗口：右上角显示数量 -->
+                                    <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-7,0" MinWidth="16" Height="16"
+                                            CornerRadius="8" Padding="4,0" Background="#E05B7CFF" BorderBrush="#80FFFFFF" BorderThickness="0.8"
+                                            Visibility="{Binding IsGroup, Converter={StaticResource BoolVis}}">
+                                        <TextBlock Text="{Binding CountText}" Foreground="White" FontSize="10.5" FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                </Grid>
                                 <!-- 指示条：活动窗口为长亮条，其它为小圆点 -->
-                                <Border x:Name="Indicator" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,3"
+                                <Border x:Name="Indicator" VerticalAlignment="{DynamicResource IndicatorV}" HorizontalAlignment="{DynamicResource IndicatorH}" Margin="{DynamicResource IndicatorMargin}"
+                                        LayoutTransform="{DynamicResource IndicatorRotate}"
                                         Height="3.5" Width="6" CornerRadius="2" Background="{DynamicResource FgDim}"
                                         Visibility="{Binding IsRunning, Converter={StaticResource BoolVis}}"/>
                             </Grid>
@@ -370,16 +452,16 @@
                         ToolTip="雨声开关（滚轮调音量）" MouseWheel="Sound_Wheel">
                     <TextBlock x:Name="SoundGlyph" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Text="&#xE767;" Foreground="{DynamicResource Fg}"/>
                 </Button>
-                <Button Style="{StaticResource GlassButton}" Width="46" Height="46" Click="QuickSettings_Click" ToolTip="网络 / 音量 / 快速设置">
-                    <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Text="&#xE713;" Foreground="{DynamicResource Fg}"/>
+                <Button x:Name="QuickButton" Style="{StaticResource GlassButton}" Width="46" Height="46" Click="QuickSettings_Click" ToolTip="网络 / 音量 / 快速设置">
+                    <TextBlock x:Name="QuickGlyph" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Text="&#xE713;" Foreground="{DynamicResource Fg}"/>
                 </Button>
-                <Button Style="{StaticResource GlassButton}" Height="52" Padding="12,0" Click="Clock_Click" ToolTip="通知与日历">
-                    <StackPanel Margin="12,0" VerticalAlignment="Center">
+                <Button x:Name="ClockButton" Style="{StaticResource GlassButton}" Height="52" Padding="12,0" Click="Clock_Click" ToolTip="通知与日历">
+                    <StackPanel x:Name="ClockPanel" Margin="12,0" VerticalAlignment="Center">
                         <TextBlock x:Name="TimeText" Text="12:00" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Fg}" HorizontalAlignment="Right"/>
                         <TextBlock x:Name="DateText" Text="10月29日 周四" FontSize="11.5" Foreground="{DynamicResource FgDim}" HorizontalAlignment="Right"/>
                     </StackPanel>
                 </Button>
-                <Button Style="{StaticResource GlassButton}" Width="14" Height="40" Margin="4,0,0,0" Click="ShowDesktop_Click" ToolTip="显示桌面">
+                <Button x:Name="DesktopButton" Style="{StaticResource GlassButton}" Width="14" Height="40" Margin="4,0,0,0" Click="ShowDesktop_Click" ToolTip="显示桌面">
                     <Border Width="2" Height="22" CornerRadius="1" Background="{DynamicResource FgDim}"/>
                 </Button>
             </StackPanel>
@@ -395,6 +477,8 @@
                 <MenuItem x:Name="MenuGlass" Header="真玻璃折射（截图 / 录屏时不显示任务栏）" IsCheckable="True" Click="MenuGlass_Click"/>
                 <MenuItem x:Name="MenuExplorer" Header="资源管理器玻璃背景" IsCheckable="True" Click="MenuExplorer_Click"/>
                 <MenuItem Header="⚡ 来一道闪电" Click="MenuStrike_Click"/>
+                <Separator/>
+                <MenuItem Header="外观与通知设置…" Click="MenuAppearance_Click"/>
                 <Separator/>
                 <MenuItem Header="任务管理器" Click="MenuTaskMgr_Click"/>
                 <MenuItem Header="退出 Lightning Taskbar（恢复系统任务栏）" Click="MenuExit_Click"/>

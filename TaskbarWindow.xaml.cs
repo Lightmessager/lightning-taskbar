@@ -25,15 +25,25 @@ public partial class TaskbarWindow : Window
     Native.RECT _mon;
     // 以下均为玻璃本体（不含投影边）的物理像素坐标
     int _barW, _barH, _shownY, _hiddenY, _x, _pad, _lastY = int.MinValue;
+    // _shownY / _hiddenY / _lastY 是“滑动轴”上的坐标：底部为 Y，Dock 在左右两侧时为 X。
+    // _bodyTopPx 是玻璃本体在窗口内沿滑动轴的偏移；_winX / _winY 是另一条轴上固定的窗口坐标。
+    int _winX, _winY, _winW, _winH, _bodyTopPx;
     double _shown = 0;               // 0 = 隐藏，1 = 显示
     DateTime _lastWanted = DateTime.Now, _edgeSince = DateTime.MaxValue, _revealUntil = DateTime.MinValue;
 
     /// <summary>把任务栏弹出来停留几秒（程序被再次启动时调用）。</summary>
     public void Reveal() => _revealUntil = DateTime.Now.AddSeconds(3);
-    int _openMenus;
+    /// <summary>
+    /// 当前打开的右键菜单。直接跟踪菜单自身的打开 / 关闭：ContextMenuOpening 在任何右键时都会触发（哪怕没有菜单），
+    /// 而菜单的主人被移除后 ContextMenuClosing 又到不了窗口，靠它们计数会卡住，任务栏就再也不隐藏、不放大。
+    /// </summary>
+    readonly HashSet<ContextMenu> _menus = new();
+    int _openMenus => _menus.Count(m => m.IsOpen);
 
     static App AppInstance => (App)Application.Current;
     static WeatherEngine Weather => WeatherEngine.Instance;
+
+    internal WindowTracker Tracker => _tracker;
 
     public TaskbarWindow()
     {
@@ -41,15 +51,21 @@ public partial class TaskbarWindow : Window
         Tasks.ItemsSource = _tracker.Items;
         TrayPinnedList.ItemsSource = AppInstance.Tray.PinnedIcons;
         TrayUnpinnedList.ItemsSource = AppInstance.Tray.UnpinnedIcons;
-        AddHandler(ContextMenuOpeningEvent, new ContextMenuEventHandler((_, _) => { _openMenus++; HidePeek(); }), true);
-        AddHandler(ContextMenuClosingEvent, new ContextMenuEventHandler((_, _) => _openMenus = Math.Max(0, _openMenus - 1)), true);
+        AddHandler(ContextMenuOpeningEvent, new ContextMenuEventHandler((_, _) => HidePeek()), true);
+        EventManager.RegisterClassHandler(typeof(ContextMenu), ContextMenu.OpenedEvent, new RoutedEventHandler((s, _) => _menus.Add((ContextMenu)s)));
+        EventManager.RegisterClassHandler(typeof(ContextMenu), ContextMenu.ClosedEvent, new RoutedEventHandler((s, _) => _menus.Remove((ContextMenu)s)));
         BarMenu.Opened += (_, _) => SyncMenu();
         InitPeek();
 
-        ContentGrid.SizeChanged += (_, _) => CenterTasks();
-        RightPanel.SizeChanged += (_, _) => CenterTasks();
-        Tasks.SizeChanged += (_, _) => CenterTasks();
-        _tracker.Items.CollectionChanged += (_, _) => Dispatcher.BeginInvoke(CenterTasks, DispatcherPriority.Loaded);
+        // Dock 悬停时内容宽度每帧都在变，只有图标数量或右侧面板变化才需要重新布局
+        ContentGrid.SizeChanged += (_, _) => { if (!IsDock) CenterTasks(); };
+        Tasks.SizeChanged += (_, _) => { if (!IsDock) CenterTasks(); };
+        RightPanel.SizeChanged += (_, _) => { if (IsDock) _finder?.Reposition(); else CenterTasks(); };
+        _tracker.Items.CollectionChanged += (_, _) =>
+        {
+            _dockVisuals = null;
+            Dispatcher.BeginInvoke(() => { if (IsDock) LayoutDock(); else CenterTasks(); }, DispatcherPriority.Loaded);
+        };
 
         SourceInitialized += OnSourceInitialized;
         _tick.Tick += (_, _) => OnTick();
@@ -68,11 +84,9 @@ public partial class TaskbarWindow : Window
         long ex = Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE).ToInt64();
         // 不抢焦点、不出现在 Alt+Tab
         Native.SetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE, new IntPtr(ex | Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE));
-        ApplyGlassMode();
 
         _scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        Layout();
-        ApplyWallpaperTint();
+        ApplyTheme();
         SyncWeatherUi();
         UpdateClock();
 
@@ -83,7 +97,13 @@ public partial class TaskbarWindow : Window
         UpdateIme();
         _tick.Start();
         _slow.Start();
-        DpiChanged += (_, args) => { _scale = args.NewDpi.DpiScaleX; Layout(); };
+        // DpiChanged 是路由事件，每新建一个子元素都会冒泡到这里；只有窗口的 DPI 真的变了才重新布局
+        DpiChanged += (_, args) =>
+        {
+            if (args.NewDpi.DpiScaleX == _scale) return;
+            _scale = args.NewDpi.DpiScaleX;
+            Layout();
+        };
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => Dispatcher.BeginInvoke(Layout);
     }
 
@@ -98,7 +118,12 @@ public partial class TaskbarWindow : Window
         bool real = RealGlass;
         GlassBg.Visibility = real ? Visibility.Visible : Visibility.Collapsed;
         FallbackBg.Visibility = real ? Visibility.Collapsed : Visibility.Visible;
-        SetBlurBehind(!real);
+        bool dock = IsDock;
+        double density = dock ? Weather.Settings.DockGlass : 1;
+        GlassBg.Opacity = FallbackBg.Opacity = density;
+        if (density < 0.01) GlassBg.Visibility = FallbackBg.Visibility = Visibility.Collapsed;
+        // 系统模糊只能作用于整个窗口，而 Dock 窗口比底座大很多（要留放大的空间），所以 Dock 不用它
+        SetBlurBehind(!real && !dock);
         ApplyRegion();
     }
 
@@ -108,7 +133,7 @@ public partial class TaskbarWindow : Window
     void ApplyRegion()
     {
         if (_hwnd == IntPtr.Zero || _barW == 0) return;
-        if (RealGlass) { Native.SetWindowRgn(_hwnd, IntPtr.Zero, true); return; }
+        if (RealGlass || IsDock) { Native.SetWindowRgn(_hwnd, IntPtr.Zero, true); return; }
         int d = (int)Math.Round(CornerRadiusDip * 2 * _scale);
         Native.SetWindowRgn(_hwnd, Native.CreateRoundRectRgn(_pad, _pad, _pad + _barW + 1, _pad + _barH + 1, d, d), true);
     }
@@ -131,6 +156,9 @@ public partial class TaskbarWindow : Window
     {
         if (_hwnd == IntPtr.Zero) return;
         _mon = Native.GetPrimaryMonitorRect();
+        _pad = (int)Math.Round(ShadowPad * _scale);
+        if (IsDock) { LayoutDock(force: true); return; }
+
         double barH = Weather.Settings.BarHeight;
         _barW = (int)Math.Round(_mon.Width - SideMargin * 2 * _scale);
         _barH = (int)Math.Round(barH * _scale);
@@ -138,15 +166,38 @@ public partial class TaskbarWindow : Window
         _shownY = _mon.Bottom - _barH - (int)Math.Round(BottomMargin * _scale);
         _hiddenY = _mon.Bottom + 2;
 
-        _pad = (int)Math.Round(ShadowPad * _scale);
-
         Width = (_barW + _pad * 2) / _scale;
         Height = barH + ShadowPad * 2;
-        _lastY = int.MinValue;
-        Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, _x - _pad, CurrentY() - _pad, _barW + _pad * 2, _barH + _pad * 2,
-            Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
+        PlaceWindow(_x - _pad, 0, _barW + _pad * 2, _barH + _pad * 2, _pad);
         ApplyRegion();
     }
+
+    void PlaceWindow(int winX, int winY, int winW, int winH, int bodyTopPx)
+    {
+        _winX = winX; _winY = winY; _winW = winW; _winH = winH; _bodyTopPx = bodyTopPx;
+        _lastY = int.MinValue;
+        var (x, y) = WindowAt(CurrentY());
+        Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, x, y, _winW, _winH, Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
+        Dispatcher.BeginInvoke(ResyncWindowSize, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// Dock 横竖切换时窗口的宽高同时大幅变化，WPF 的内部布局可能停在旧尺寸，
+    /// 超出旧尺寸的内容全被裁掉（窗口坐标是对的，但图标只显示一小块或完全不见）。
+    /// 这里核对一次，不一致就让窗口再发一次尺寸变化。
+    /// </summary>
+    void ResyncWindowSize()
+    {
+        if (Math.Abs(Root.ActualWidth * _scale - _winW) < 2 && Math.Abs(Root.ActualHeight * _scale - _winH) < 2) return;
+        Native.SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, _winW + 1, _winH + 1, Native.SWP_NOMOVE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+        Native.SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, _winW, _winH, Native.SWP_NOMOVE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+        InvalidateMeasure();
+        UpdateLayout();
+    }
+
+    /// <summary>滑动轴坐标 → 窗口左上角。</summary>
+    (int x, int y) WindowAt(int slide) =>
+        DockIsVertical ? (slide - _bodyTopPx, _winY) : (_winX, slide - _bodyTopPx);
 
     int CurrentY()
     {
@@ -195,20 +246,19 @@ public partial class TaskbarWindow : Window
         Native.GetCursorPos(out var pt);
         var now = DateTime.Now;
 
-        var shownRect = new Native.RECT { Left = _x, Top = _shownY, Right = _x + _barW, Bottom = _shownY + _barH };
-        int curY = CurrentY();
-        bool overBar = pt.X >= _x && pt.X < _x + _barW && pt.Y >= curY && pt.Y < curY + _barH && _shown > 0.3;
-        bool atEdge = pt.Y >= _mon.Bottom - 2 && pt.X >= _mon.Left && pt.X < _mon.Right;
+        var shownRect = BodyRect(_shownY);
+        bool overBar = OverBody(pt) && _shown > 0.3;
+        bool atEdge = AtScreenEdge(pt);
 
         var fg = Native.GetForegroundWindow();
         var state = ClassifyForeground(fg, shownRect);
 
         if (atEdge) { if (_edgeSince == DateTime.MaxValue) _edgeSince = now; }
         else _edgeSince = DateTime.MaxValue;
-        // 全屏（游戏/视频）时需要在底边停留一下才呼出，避免误触
-        bool edgeReveal = atEdge && (state != FgState.Fullscreen || (now - _edgeSince).TotalMilliseconds > 350);
+        // 全屏（游戏/视频）时需要在屏幕边停留一下才呼出，避免误触；左右两侧也一样，那里常有滚动条
+        bool edgeReveal = atEdge && ((state != FgState.Fullscreen && !DockIsVertical) || (now - _edgeSince).TotalMilliseconds > 350);
 
-        bool want = overBar || edgeReveal || now < _revealUntil || _openMenus > 0 || PeekOpen || TrayPopup.IsOpen || ImePopup.IsOpen || AppInstance.StartMenu.IsVisible || state == FgState.Clear;
+        bool want = overBar || edgeReveal || now < _revealUntil || _openMenus > 0 || PeekOpen || TrayPopup.IsOpen || ImePopup.IsOpen || AppInstance.StartMenu.IsVisible || AppInstance.AppearanceOpen || state == FgState.Clear;
         if (want) _lastWanted = now;
         double target = want || (now - _lastWanted).TotalMilliseconds < 800 ? 1 : 0;
 
@@ -221,12 +271,18 @@ public partial class TaskbarWindow : Window
         if (y != _lastY)
         {
             bool reassertTop = prev < 0.01 && _shown > 0;
-            Native.SetWindowPos(_hwnd, reassertTop ? Native.HWND_TOPMOST : IntPtr.Zero, _x - _pad, y - _pad, 0, 0,
+            var (wx, wy) = WindowAt(y);
+            Native.SetWindowPos(_hwnd, reassertTop ? Native.HWND_TOPMOST : IntPtr.Zero, wx, wy, 0, 0,
                 Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | (reassertTop ? 0 : Native.SWP_NOZORDER));
             _lastY = y;
         }
         ContentGrid.Opacity = 0.35 + 0.65 * _shown;
         UpdateGlassOptics();
+        if (IsDock)
+        {
+            UpdateHover(pt);
+            UpdateFinder(pt, fg, now);
+        }
 
         // 桌面被挡住时暂停桌面雨层绘制（声音照常）
         AppInstance.Desktop.Scene.Paused = state == FgState.Fullscreen || state == FgState.Maximized;
@@ -257,8 +313,30 @@ public partial class TaskbarWindow : Window
         return r.Intersects(barRect) ? FgState.Overlapping : FgState.Clear;
     }
 
+    static string ReloadFlag => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LightningTaskbar", "debug-reload-settings");
+
+    /// <summary>调试：存在该文件时重新读取外观设置并应用（等同于在面板里改），读完删除。</summary>
+    void CheckReloadFlag()
+    {
+        if (!System.IO.File.Exists(ReloadFlag)) return;
+        try { System.IO.File.Delete(ReloadFlag); } catch { }
+        var d = Settings.Load();
+        var s = Weather.Settings;
+        s.Theme = d.Theme;
+        s.DockEdge = d.DockEdge;
+        s.DockIconSize = d.DockIconSize;
+        s.DockLift = d.DockLift;
+        s.DockMagnify = d.DockMagnify;
+        s.DockReflection = d.DockReflection;
+        s.DockGlass = d.DockGlass;
+        s.DockHoverEffect = d.DockHoverEffect;
+        s.FinderCorner = d.FinderCorner;
+        ApplyTheme();
+    }
+
     void OnSlowTick()
     {
+        CheckReloadFlag();
         _tracker.Refresh();
         ShellTaskbar.Enforce();
         UpdateClock();
@@ -286,12 +364,14 @@ public partial class TaskbarWindow : Window
         _lightTheme = light;
         _themeApplied = true;
         bool storm = Weather.Mode != WeatherMode.Off;
+        // Dock 要“看不出有一条栏”：染色只留一半，浓淡再由 DockGlass 决定
+        double tintScale = IsDock ? 0.5 : 1;
 
         if (light)
         {
             // 浅色背景：像磨砂白玻璃，配深色字，不再把玻璃压成灰色
             GlassBg.TintColor = Color.FromRgb(246, 248, 252);
-            GlassBg.BaseTint = 0.18;
+            GlassBg.BaseTint = 0.18 * tintScale;
             GlassBg.AdaptiveTint = false;
             GlassBg.HighlightCompression = 0.05;
         }
@@ -299,7 +379,7 @@ public partial class TaskbarWindow : Window
         {
             // 深色背景：极淡的环境色染色，雨天稍深，保证白字可读
             GlassBg.TintColor = Mix(c, Colors.Black, 0.6);
-            GlassBg.BaseTint = storm ? 0.16 : 0.1;
+            GlassBg.BaseTint = (storm ? 0.16 : 0.1) * tintScale;
             GlassBg.AdaptiveTint = true;
             GlassBg.HighlightCompression = 0.38;
         }
@@ -528,6 +608,7 @@ public partial class TaskbarWindow : Window
         if (Weather.Settings.ExplorerGlass) ExplorerGlass.Start(); else ExplorerGlass.Stop();
     }
     void MenuStrike_Click(object sender, RoutedEventArgs e) => Weather.Strike();
+    void MenuAppearance_Click(object sender, RoutedEventArgs e) => AppInstance.ShowAppearance();
     void MenuTaskMgr_Click(object sender, RoutedEventArgs e) =>
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("taskmgr.exe") { UseShellExecute = true });
 

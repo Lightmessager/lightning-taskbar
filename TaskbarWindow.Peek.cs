@@ -37,13 +37,21 @@ public partial class TaskbarWindow
         _peekClose.Tick += (_, _) => { _peekClose.Stop(); HidePeek(); };
         PeekPopup.CustomPopupPlacementCallback = (popup, target, _) => new[]
         {
-            // 水平居中在图标正上方；PeekRoot 底部留了回弹余量，所以只需略微往下压
-            new CustomPopupPlacement(new Point((target.Width - popup.Width) / 2, -popup.Height + 4), PopupPrimaryAxis.Horizontal),
+            // 在图标朝屏幕内的一侧居中；Dock 的图标悬停时会伸出按钮，预览要让开这一段
+            new CustomPopupPlacement(ActiveEdge switch
+            {
+                DockEdge.Left => new Point(target.Width + PeekClearance * _scale, (target.Height - popup.Height) / 2),
+                DockEdge.Right => new Point(-popup.Width - PeekClearance * _scale, (target.Height - popup.Height) / 2),
+                // PeekRoot 底部留了回弹余量，所以只需略微往下压
+                _ => new Point((target.Width - popup.Width) / 2, -popup.Height + 4 - PeekClearance * _scale),
+            }, PopupPrimaryAxis.Horizontal),
         };
         PeekPopup.Closed += (_, _) => ClearThumbs();
     }
 
     bool PeekOpen => PeekPopup.IsOpen;
+
+    double PeekClearance => IsDock ? Math.Max(0, Weather.Settings.DockIconSize * (Weather.Settings.DockMagnify - 1) - StageInset) : 0;
 
     // ---------------- 悬停 ----------------
 

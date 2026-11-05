@@ -52,6 +52,12 @@ public sealed class GlassSurface : FrameworkElement
 
     public LiquidGlassEffect Glass { get; }
 
+    /// <summary>
+    /// 允许截图 / 录屏时看到玻璃窗口。玻璃靠截取背后的屏幕来渲染，要参与捕获就不能再截（会截到自己），
+    /// 所以开启后背景定格在开启前的最后一帧，不再实时刷新。
+    /// </summary>
+    public static bool AllowCapture { get; set; }
+
     readonly BackdropCapture _capture = new();
     readonly GlassDrops _drops = new();
     readonly ImageBrush _sharpBrush = new() { Stretch = Stretch.Fill }, _frostBrush = new() { Stretch = Stretch.Fill };
@@ -104,18 +110,21 @@ public sealed class GlassSurface : FrameworkElement
         double dt = _lastFrame < 0 ? 0 : Math.Clamp(now - _lastFrame, 0, 0.1);
         if (dt <= 0 && _lastFrame >= 0) return;   // 同一帧可能触发多次
         _lastFrame = now;
-        if (!IsVisible || ActualWidth < 1 || ActualHeight < 1) return;
+        bool visible = IsVisible && ActualWidth >= 1 && ActualHeight >= 1;
 
-        // 调试开关：存在该文件时让窗口可被截图，并冻结背景（否则会截到自己）
         _sinceCapture += dt;
         if (_sinceCapture >= 1 / Fps)
         {
             _sinceCapture = 0;
-            bool debug = File.Exists(DebugFlag);
-            if (debug != _frozen) { _frozen = debug; SetCaptureExclusion(!debug); }
+            // 玻璃不显示时没有东西要截，窗口不必躲着截图。
+            // 要求允许截图时先截到一帧背景再放开，否则玻璃一直是黑的。
+            bool allow = AllowCapture || File.Exists(DebugFlag);
+            bool frozen = !visible || (allow && _capture.Sharp != null);
+            if (frozen != _frozen) { _frozen = frozen; SetCaptureExclusion(!frozen); }
             if (!_frozen) Capture();
         }
 
+        if (!visible) return;
         UpdateDrops(dt);
         UpdateConstants();
     }

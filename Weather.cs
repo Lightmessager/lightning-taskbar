@@ -6,8 +6,48 @@ namespace LightningTaskbar;
 
 public enum WeatherMode { Off, Rain, Storm }
 
+/// <summary>Dock = 居中悬浮、带倒影和放大；Classic = 通栏胶囊。</summary>
+public enum BarTheme { Dock, Classic }
+
+/// <summary>Dock 停靠的屏幕边。</summary>
+public enum DockEdge { Bottom, Left, Right }
+
+/// <summary>屏幕顶部的两个角：Finder 栏和通知卡片各选一个。</summary>
+public enum TopCorner { Left, Right }
+
+/// <summary>鼠标悬停 Dock 图标时的特效（和放大可以同时生效）。</summary>
+public enum HoverEffect { LightMask, Glow, Spotlight, Bounce, None }
+
 public sealed class Settings
 {
+    public BarTheme Theme { get; set; } = BarTheme.Dock;
+    /// <summary>Dock 图标边长（DIP）。</summary>
+    public double DockIconSize { get; set; } = 52;
+    public DockEdge DockEdge { get; set; } = DockEdge.Bottom;
+    /// <summary>Dock 离所停靠屏幕边的距离（DIP）。</summary>
+    public double DockLift { get; set; } = 14;
+    /// <summary>Finder 栏（托盘、输入法、时钟等）所在的角。</summary>
+    public TopCorner FinderCorner { get; set; } = TopCorner.Right;
+    /// <summary>通知卡片弹出的角。</summary>
+    public TopCorner NotifyCorner { get; set; } = TopCorner.Left;
+    /// <summary>鼠标悬停时的最大放大倍率，1 = 不放大。</summary>
+    public double DockMagnify { get; set; } = 1.35;
+    public HoverEffect DockHoverEffect { get; set; } = HoverEffect.LightMask;
+    /// <summary>倒影强度 0..1，0 = 无倒影。</summary>
+    public double DockReflection { get; set; } = 0.5;
+    /// <summary>玻璃底座浓度 0..1，0 = 只留图标和倒影。</summary>
+    public double DockGlass { get; set; } = 0.6;
+    /// <summary>允许截图和录屏时看到任务栏等玻璃窗口（玻璃背景不再实时刷新）。</summary>
+    public bool AllowScreenshots { get; set; }
+    /// <summary>在右上角用玻璃卡片显示系统通知。</summary>
+    public bool GlassNotifications { get; set; } = true;
+    /// <summary>从开始菜单固定到任务栏的应用的显示名（键为固定项路径）。</summary>
+    public Dictionary<string, string> PinTitles { get; set; } = new();
+    /// <summary>在闪电开始菜单里额外固定的应用（AppEntry.ParsingName）。</summary>
+    public List<string> StartAdded { get; set; } = new();
+    /// <summary>在闪电开始菜单里取消固定的 Windows 固定项（AppEntry.ParsingName）。</summary>
+    public List<string> StartHidden { get; set; } = new();
+
     public WeatherMode Mode { get; set; } = WeatherMode.Storm;
     public bool Sound { get; set; } = true;
     public double Volume { get; set; } = 0.6;

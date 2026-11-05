@@ -109,6 +109,18 @@
                         <DataTemplate DataType="{x:Type sm:AppEntry}">
                             <Button Style="{StaticResource Tile}" Width="106" Height="98" Click="App_Click" ToolTip="{Binding Name}"
                                     HorizontalContentAlignment="Center">
+                                <Button.ContextMenu>
+                                    <ContextMenu Opened="AppMenu_Opened">
+                                        <MenuItem Header="打开" Tag="open" Click="AppOpen_Click"/>
+                                        <MenuItem Header="以管理员身份运行" Tag="admin" Click="AppAdmin_Click"/>
+                                        <Separator/>
+                                        <MenuItem Tag="pinStart" Click="AppPinStart_Click"/>
+                                        <MenuItem Tag="pinBar" Click="AppPinBar_Click"/>
+                                        <Separator/>
+                                        <MenuItem Header="打开文件位置" Tag="location" Click="AppLocation_Click"/>
+                                        <MenuItem Header="卸载…" Tag="uninstall" Click="AppUninstall_Click"/>
+                                    </ContextMenu>
+                                </Button.ContextMenu>
                                 <StackPanel>
                                     <Image Source="{Binding Icon}" Width="40" Height="40" RenderOptions.BitmapScalingMode="HighQuality">
                                         <Image.Effect><DropShadowEffect BlurRadius="10" ShadowDepth="2" Opacity="0.35"/></Image.Effect>
