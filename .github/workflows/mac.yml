@@ -1,0 +1,64 @@
+name: macOS
+
+on:
+  push:
+    paths: ['mac/**', '.github/workflows/mac.yml']
+  pull_request:
+    paths: ['mac/**', '.github/workflows/mac.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: mac
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 环境
+        run: sw_vers && xcodebuild -version && swift --version
+
+      - name: 单元测试（含与 C# 版逐样本比对）
+        run: swift test 2>&1 | tee test.log
+
+      - name: 离线渲染音频和雨景
+        run: swift run -c release weather-render out
+
+      - name: 打包 .app
+        run: bash scripts/bundle.sh
+
+      - name: 启动应用并截屏
+        continue-on-error: true
+        run: |
+          mkdir -p out
+          open -n build/LightningWeather.app --args --storm --demo-notification --demo-strike
+          sleep 2
+          for i in 1 2 3 4 5 6 7 8; do screencapture -x "out/screen_$i.png" || true; done
+          sleep 2
+          screencapture -x out/screen_late.png || true
+          pgrep -lf LightningWeather || echo "应用没有在运行"
+          log show --last 2m --predicate 'process == "LightningWeather"' --style compact > out/app.log 2>&1 || true
+          tail -n 40 out/app.log || true
+          pkill -x LightningWeather || true
+
+      - name: 上传渲染产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-${{ matrix.os }}
+          path: |
+            mac/out
+            mac/test.log
+
+      - name: 上传应用
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LightningWeather-${{ matrix.os }}
+          path: mac/build/LightningWeather-macOS.zip

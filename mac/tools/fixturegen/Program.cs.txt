@@ -1,0 +1,52 @@
+using System.Text;
+using LightningTaskbar.Audio;
+
+// 生成 Swift 移植版的参考数据：同种子下 .NET 版本的输出。
+// 格式：little-endian float32，[0] = 采样步长 stride，其余为按 stride 抽取的交错立体声样本。
+var outDir = args[0];
+Directory.CreateDirectory(outDir);
+const int SR = 44100;
+
+void Write(string name, float[] interleaved, int stride)
+{
+    using var w = new BinaryWriter(File.Create(Path.Combine(outDir, name)));
+    w.Write((float)stride);
+    int frames = interleaved.Length / 2;
+    for (int f = 0; f < frames; f += stride) { w.Write(interleaved[f * 2]); w.Write(interleaved[f * 2 + 1]); }
+}
+
+// Random 序列
+var sb = new StringBuilder();
+foreach (int seed in new[] { 1, 12345, 777, 4242, int.MaxValue })
+{
+    var r = new Random(seed);
+    sb.Append($"{seed}");
+    for (int i = 0; i < 8; i++) sb.Append(' ').Append(r.NextDouble().ToString("R"));
+    for (int i = 0; i < 4; i++) sb.Append(' ').Append(r.Next(5));
+    for (int i = 0; i < 4; i++) sb.Append(' ').Append(r.Next());
+    sb.AppendLine();
+}
+File.WriteAllText(Path.Combine(outDir, "random.txt"), sb.ToString());
+
+{   // 雨：种子 12345，雨量 1.0，3 秒
+    var s = new RainSynth(12345); int n = SR * 3; var buf = new float[n * 2];
+    for (int i = 0; i < n; i++) { s.Next(1f, out var l, out var r); buf[i * 2] = l; buf[i * 2 + 1] = r; }
+    Write("rain_12345.f32", buf, 7);
+}
+{   // 小雨：种子 777，雨量 0.385
+    var s = new RainSynth(777); int n = SR * 3; var buf = new float[n * 2];
+    for (int i = 0; i < n; i++) { s.Next(0.385f, out var l, out var r); buf[i * 2] = l; buf[i * 2 + 1] = r; }
+    Write("rain_777.f32", buf, 7);
+}
+{   // 风：种子 99，阵风 0.9，4 秒
+    var s = new WindSynth(99); int n = SR * 4; var buf = new float[n * 2];
+    for (int i = 0; i < n; i++) { s.Next(0.9f, out var l, out var r); buf[i * 2] = l; buf[i * 2 + 1] = r; }
+    Write("wind_99.f32", buf, 7);
+}
+{   // 雷
+    var t = ThunderSynth.Generate(1.0, 0.5, 4242);
+    Write("thunder_4242.f32", t, 97);
+    var t2 = ThunderSynth.Generate(0.5, 0.2, 3000);
+    Write("thunder_3000.f32", t2, 97);
+}
+Console.WriteLine("ok");

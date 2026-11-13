@@ -58,6 +58,10 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -Run
 - Windows 11（Windows 10 2004 及以上也可，真玻璃需要 `WDA_EXCLUDEFROMCAPTURE`）
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 
+## macOS 版
+
+桌面雷雨、合成音效和玻璃通知另有一个 macOS 菜单栏版本，代码在 [`mac/`](mac/README.md)（Swift，不替换 Dock 和菜单栏）。
+
 ## 许可
 
 [MIT](LICENSE)。第三方组件：[ManagedShell](https://github.com/cairoshell/ManagedShell)（MIT）。
