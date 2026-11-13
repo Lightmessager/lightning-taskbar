@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 40
     defaults:
       run:
+        shell: bash
         working-directory: mac
     steps:
       - uses: actions/checkout@v4

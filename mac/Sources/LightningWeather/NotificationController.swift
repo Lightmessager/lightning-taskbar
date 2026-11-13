@@ -48,14 +48,14 @@ final class NotificationController {
             var fresh: [DeliveredNotification] = []
             var newLast = previous
             var focus = false
-            if let database {
+            if let opened = database {
                 do {
                     if let previous {
-                        fresh = try database.records(after: previous)
+                        fresh = try opened.records(after: previous)
                         if let last = fresh.last { newLast = last.recordID }
                     } else {
                         // 第一轮只记下已有的通知，不把通知中心里的旧消息重新弹一遍
-                        newLast = try database.maxRecordID()
+                        newLast = try opened.maxRecordID()
                     }
                     if !fresh.isEmpty { focus = FocusState.isFocusActive() }
                 } catch {
