@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindow?
     private(set) var notifications: NotificationController!
     private let coverage = CoverageMonitor()
+    private let edgeGlow = EdgeGlow()
     private var timer: Timer?
     private var lastTick = ProcessInfo.processInfo.systemUptime
 
@@ -40,6 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coverage.start()
 
         notifications = NotificationController(settings: { [weak self] in self?.settings ?? Settings() })
+        notifications.onCardShown = { [weak self] screen in
+            guard let self, self.settings.edgeGlow else { return }
+            self.edgeGlow.flash(on: screen)
+        }
         notifications.start()
 
         statusMenu = StatusMenu(app: self)
@@ -51,10 +56,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             update { $0.welcomed = true }
             showSettings()
         }
+        // 菜单栏布局好之后检查图标是否被刘海挡住；挡住了就弹出设置窗口说明怎么办
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let hidden = self.statusMenu.iconHidden
+                Log.write("菜单栏图标：\(hidden ? "被挡住" : "可见")（\(self.statusMenu.iconFrameDescription)）")
+                if hidden { self.showSettings() }
+            }
+        }
 
         // 开发/CI 用：启动时弹一张测试卡片，便于截图检查
         if args.contains("--demo-notification") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in
                 MainActor.assumeIsolated {
                     self?.notifications.show(.init(appName: "闪电天气", title: "玻璃通知预览",
                                                    body: "这张卡片由 --demo-notification 启动参数生成。",
@@ -81,6 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showSettings()
         return true
     }
+
+    var statusIconHidden: Bool { statusMenu?.iconHidden ?? false }
 
     func showSettings() {
         if settingsWindow == nil { settingsWindow = SettingsWindow(app: self) }

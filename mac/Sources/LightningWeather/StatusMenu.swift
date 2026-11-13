@@ -8,12 +8,26 @@ import NotifyCore
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
     private unowned let app: AppDelegate
-    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private let item: NSStatusItem
+    static let autosaveName = "LightningWeatherStatusItem"
     private let menu = NSMenu()
     private let volumeSlider = NSSlider(value: 0.6, minValue: 0, maxValue: 1, target: nil, action: nil)
 
     init(app: AppDelegate) {
         self.app = app
+        // 新加的菜单栏图标默认排在右侧图标区的最左边——正好紧挨刘海，图标一多就第一个被藏起来。
+        // 系统按 “NSStatusItem Preferred Position <autosaveName>”（离屏幕右边的距离）摆放图标，
+        // 第一次运行时把它设为 0：紧贴系统图标（控制中心、时钟）的左边，最不容易被刘海挡住。
+        // 之后用户按住 ⌘ 拖到别处，系统会记住新位置，这里不再改。
+        let defaults = UserDefaults.standard
+        if !defaults.bool(forKey: "StatusItemPositioned.v2") {
+            defaults.set(0.0, forKey: "NSStatusItem Preferred Position \(Self.autosaveName)")
+            defaults.set(true, forKey: "NSStatusItem Visible \(Self.autosaveName)")
+            defaults.set(true, forKey: "StatusItemPositioned.v2")
+        }
+        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.autosaveName = Self.autosaveName
+        item.isVisible = true
         super.init()
         menu.delegate = self
         item.menu = menu
@@ -21,9 +35,27 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         volumeSlider.action = #selector(volumeChanged(_:))
         volumeSlider.isContinuous = true
         app.notifications.onAccessChanged = { [weak self] in self?.refresh() }
-        // 图标出现在第一次之后都会留在用户拖到的位置
-        item.autosaveName = "LightningWeatherStatusItem"
         refresh()
+    }
+
+    /// 图标是否被刘海挡住或被系统藏起来了。
+    /// 有刘海的屏幕上，auxiliaryTopRightArea 是刘海右边能放图标的区域；图标不在里面就看不见。
+    var iconHidden: Bool {
+        guard let win = item.button?.window, item.isVisible else { return true }
+        let f = win.frame
+        guard let screen = win.screen ?? NSScreen.screens.first(where: { $0.frame.intersects(f) }) else { return true }
+        if !win.occlusionState.contains(.visible) && !screen.frame.intersects(f) { return true }
+        if let right = screen.auxiliaryTopRightArea {
+            // auxiliaryTopRightArea 用的是屏幕本地坐标
+            return f.minX - screen.frame.minX < right.minX - 1
+        }
+        return !screen.frame.contains(f)
+    }
+
+    /// 图标的位置（诊断用）。
+    var iconFrameDescription: String {
+        guard let f = item.button?.window?.frame else { return "无窗口" }
+        return "x=\(Int(f.minX)) 宽=\(Int(f.width))"
     }
 
     func refresh() {
@@ -78,6 +110,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
         corner.submenu = sub
         menu.addItem(corner)
+        add("来通知时屏幕边缘闪光", #selector(toggleGlow)).state = s.edgeGlow ? .on : .off
         switch app.notifications.access {
         case .ok: break
         case .denied:
@@ -137,6 +170,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         guard let raw = sender.representedObject as? String, let c = TopCorner(rawValue: raw) else { return }
         app.update { $0.notifyCorner = c }
     }
+
+    @objc private func toggleGlow() { app.update { $0.edgeGlow.toggle() } }
 
     @objc private func toggleAllScreens() { app.update { $0.allScreens.toggle() } }
 

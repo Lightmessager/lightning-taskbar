@@ -25,6 +25,8 @@ final class NotificationController {
     /// 给设置窗口看的一行状态，如“正常 · 库里 52 条 · 最近：微信 14:03”。
     private(set) var statusText = "正在检查…"
     var onAccessChanged: (() -> Void)?
+    /// 每弹出一张卡片调用一次（用来触发屏幕边缘闪光）。
+    var onCardShown: ((NSScreen) -> Void)?
 
     init(settings: @escaping () -> Settings) {
         self.settings = settings
@@ -147,6 +149,7 @@ final class NotificationController {
         let rest = restFrame(for: card, index: cards.filter { !$0.leaving }.count - 1, screen: screen)
         // 从屏幕外一点点滑入
         card.present(at: rest, from: rest.offsetBy(dx: onLeft ? -40 : 40, dy: 0))
+        onCardShown?(screen)
     }
 
     private var onLeft: Bool { settings().notifyCorner == .left }

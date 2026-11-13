@@ -18,6 +18,8 @@ public struct Settings: Codable, Equatable, Sendable {
     /// 用玻璃卡片显示系统通知。
     public var glassNotifications = true
     public var notifyCorner: TopCorner = .right
+    /// 来通知时屏幕四周亮起一圈流动的光。
+    public var edgeGlow = true
     /// 在所有显示器上下雨（否则只有主显示器）。
     public var allScreens = true
     /// 是否已经弹过一次设置窗口（首次启动时弹出，告诉用户图标在哪）。
@@ -26,7 +28,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case mode, sound, volume, glassNotifications, notifyCorner, allScreens, welcomed
+        case mode, sound, volume, glassNotifications, notifyCorner, edgeGlow, allScreens, welcomed
     }
 
     public init(from decoder: Decoder) throws {
@@ -37,6 +39,7 @@ public struct Settings: Codable, Equatable, Sendable {
         volume = (try? c.decodeIfPresent(Double.self, forKey: .volume)) ?? d.volume
         glassNotifications = (try? c.decodeIfPresent(Bool.self, forKey: .glassNotifications)) ?? d.glassNotifications
         notifyCorner = (try? c.decodeIfPresent(TopCorner.self, forKey: .notifyCorner)) ?? d.notifyCorner
+        edgeGlow = (try? c.decodeIfPresent(Bool.self, forKey: .edgeGlow)) ?? d.edgeGlow
         allScreens = (try? c.decodeIfPresent(Bool.self, forKey: .allScreens)) ?? d.allScreens
         welcomed = (try? c.decodeIfPresent(Bool.self, forKey: .welcomed)) ?? d.welcomed
         volume = min(1, max(0, volume))

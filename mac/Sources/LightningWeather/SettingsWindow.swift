@@ -14,11 +14,15 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     private let volume = NSSlider(value: 0.6, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let notifyBox = NSButton(checkboxWithTitle: "用玻璃卡片显示通知", target: nil, action: nil)
     private let cornerPopup = NSPopUpButton()
+    private let glowBox = NSButton(checkboxWithTitle: "来通知时屏幕边缘闪光", target: nil, action: nil)
     private let notifyStatus = NSTextField(wrappingLabelWithString: "")
     private let accessButton = NSButton(title: "打开“完全磁盘访问权限”设置…", target: nil, action: nil)
     private let allScreensBox = NSButton(checkboxWithTitle: "所有显示器都下雨", target: nil, action: nil)
     private let loginBox = NSButton(checkboxWithTitle: "登录时启动", target: nil, action: nil)
     private var statusTimer: Timer?
+    private var hint: NSTextField!
+    private static let normalHint = "菜单栏右上角有一朵云的图标。以后找不到它时，再次打开“闪电天气”（双击应用或用聚焦搜索）就会显示这个窗口。"
+    private static let hiddenHint = "⚠️ 菜单栏图标被刘海挡住了：右上角图标太多，放不下的会被藏起来。可以按住 ⌘ 把其它不常用的图标拖出菜单栏，或在 系统设置 › 菜单栏 里关掉一些；在这之前，可以随时再次打开“闪电天气”来调出这个窗口。"
 
     init(app: AppDelegate) {
         self.app = app
@@ -71,7 +75,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         let header = NSStackView(views: [icon, titles])
         header.spacing = 12
 
-        let hint = note("菜单栏右上角有一朵云的图标。有刘海的 MacBook 上图标太多时它会被藏到刘海后面——这时再次打开“闪电天气”（双击应用或用聚焦搜索）就会显示这个窗口；也可以按住 ⌘ 拖动菜单栏图标，把它挪到左边。")
+        hint = note("菜单栏右上角有一朵云的图标。有刘海的 MacBook 上图标太多时它会被藏到刘海后面——这时再次打开“闪电天气”（双击应用或用聚焦搜索）就会显示这个窗口；也可以按住 ⌘ 拖动菜单栏图标，把它挪到左边。")
 
         weatherControl.target = self
         weatherControl.action = #selector(weatherChanged)
@@ -92,6 +96,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         cornerPopup.target = self
         cornerPopup.action = #selector(cornerChanged)
         let notifyRow = row("通知", [notifyBox, cornerPopup])
+        glowBox.target = self
+        glowBox.action = #selector(glowToggled)
+        let glowRow = row("", [glowBox])
         notifyStatus.textColor = .secondaryLabelColor
         notifyStatus.font = .systemFont(ofSize: 12)
         notifyStatus.preferredMaxLayoutWidth = 380
@@ -111,8 +118,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
         let quit = NSButton(title: "退出闪电天气", target: NSApp, action: #selector(NSApplication.terminate(_:)))
 
-        let stack = NSStackView(views: [header, hint, separator(), weatherRow, soundRow, separator(),
-                                        notifyRow, notifyStatus, notifyButtons, notifyHelp, separator(), otherRow, quit])
+        let stack = NSStackView(views: [header, hint!, separator(), weatherRow, soundRow, separator(),
+                                        notifyRow, glowRow, notifyStatus, notifyButtons, notifyHelp, separator(), otherRow, quit])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -167,6 +174,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         volume.isEnabled = s.sound
         notifyBox.state = s.glassNotifications ? .on : .off
         cornerPopup.selectItem(at: s.notifyCorner == .left ? 0 : 1)
+        glowBox.state = s.edgeGlow ? .on : .off
         allScreensBox.state = s.allScreens ? .on : .off
         loginBox.state = SMAppService.mainApp.status == .enabled ? .on : .off
         refreshStatus()
@@ -174,6 +182,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     private func refreshStatus() {
         notifyStatus.stringValue = "状态：" + app.notifications.statusText
+        hint.stringValue = app.statusIconHidden ? Self.hiddenHint : Self.normalHint
+        hint.textColor = app.statusIconHidden ? .systemOrange : .secondaryLabelColor
         accessButton.isHidden = app.notifications.access == .ok
     }
 
@@ -196,6 +206,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         app.update(refreshMenu: false) { $0.volume = v }
     }
     @objc private func notifyToggled() { app.update { $0.glassNotifications = notifyBox.state == .on } }
+    @objc private func glowToggled() { app.update { $0.edgeGlow = glowBox.state == .on } }
     @objc private func cornerChanged() { app.update { $0.notifyCorner = cornerPopup.indexOfSelectedItem == 0 ? .left : .right } }
     @objc private func allScreensToggled() { app.update { $0.allScreens = allScreensBox.state == .on } }
 
