@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import WeatherCore
 
 @MainActor
@@ -8,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let audio = AudioOutput()
     private var rainWindows: [RainWindow] = []
     private var statusMenu: StatusMenu!
+    private var settingsWindow: SettingsWindow?
     private(set) var notifications: NotificationController!
     private let coverage = CoverageMonitor()
     private var timer: Timer?
@@ -41,6 +43,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifications.start()
 
         statusMenu = StatusMenu(app: self)
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        Log.write("启动 \(version)，macOS \(ProcessInfo.processInfo.operatingSystemVersionString)，\(NSScreen.screens.count) 块屏幕")
+
+        // 首次启动弹出设置窗口：菜单栏图标可能被刘海挡住，得让用户知道应用已经在运行、去哪里找它
+        if !settings.welcomed || args.contains("--show-settings") {
+            update { $0.welcomed = true }
+            showSettings()
+        }
 
         // 开发/CI 用：启动时弹一张测试卡片，便于截图检查
         if args.contains("--demo-notification") {
@@ -64,6 +74,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+    }
+
+    /// 应用已在运行时再次打开它（双击、聚焦搜索、启动台）：弹出设置窗口。
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showSettings()
+        return true
+    }
+
+    func showSettings() {
+        if settingsWindow == nil { settingsWindow = SettingsWindow(app: self) }
+        settingsWindow?.show()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -93,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.save()
         rainWindows.forEach { $0.weatherTick() }
         statusMenu?.refresh()
+        settingsWindow?.refresh()
     }
 
     // MARK: 菜单调用
@@ -107,7 +129,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.save()
         applyAudioSettings()
         if oldAll != settings.allScreens { rebuildRainWindows() }
-        if refreshMenu { statusMenu?.refresh() }
+        if refreshMenu {
+            statusMenu?.refresh()
+            settingsWindow?.refresh()
+        }
+    }
+
+    func toggleLoginItem() {
+        do {
+            if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
+            else { try SMAppService.mainApp.register() }
+        } catch {
+            Log.write("登录项设置失败：\(error)")
+        }
+        statusMenu?.refresh()
+    }
+
+    func openFullDiskAccess() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func showTestCard() {
+        notifications.show(.init(appName: "闪电天气", title: "这是一张测试通知",
+                                 body: "真正的通知来自系统通知数据库；点击卡片会打开发通知的应用。",
+                                 icon: NSApp.applicationIconImage, appURL: nil))
     }
 
     private func applyAudioSettings() {

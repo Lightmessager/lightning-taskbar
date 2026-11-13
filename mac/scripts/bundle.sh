@@ -13,6 +13,11 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/LightningWeather"
 cp scripts/Info.plist "$APP/Contents/Info.plist"
+
+# 应用图标：用代码画出各尺寸，再转成 .icns
+rm -rf build/AppIcon.iconset
+swift run -c release weather-render --icon build/AppIcon.iconset
+iconutil -c icns build/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 codesign --force --sign - --timestamp=none "$APP"
 codesign --verify --verbose "$APP"
 lipo -info "$APP/Contents/MacOS/LightningWeather"

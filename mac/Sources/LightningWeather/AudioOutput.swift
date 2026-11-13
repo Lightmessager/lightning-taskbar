@@ -47,7 +47,7 @@ final class AudioOutput {
             engine.prepare()
             try engine.start()
         } catch {
-            NSLog("LightningWeather: 音频启动失败 \(error)")
+            Log.write("音频启动失败：\(error)")
         }
     }
 }

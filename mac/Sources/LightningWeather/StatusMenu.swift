@@ -21,6 +21,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         volumeSlider.action = #selector(volumeChanged(_:))
         volumeSlider.isContinuous = true
         app.notifications.onAccessChanged = { [weak self] in self?.refresh() }
+        // 图标出现在第一次之后都会留在用户拖到的位置
+        item.autosaveName = "LightningWeatherStatusItem"
         refresh()
     }
 
@@ -92,6 +94,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         add("登录时启动", #selector(toggleLogin)).state = SMAppService.mainApp.status == .enabled ? .on : .off
 
         menu.addItem(.separator())
+        add("设置与诊断…", #selector(openSettings))
         let quit = NSMenuItem(title: "退出闪电天气", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
@@ -137,25 +140,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func toggleAllScreens() { app.update { $0.allScreens.toggle() } }
 
-    @objc private func openFullDiskAccess() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    @objc private func testCard() {
-        app.notifications.show(.init(appName: "闪电天气", title: "这是一张测试通知",
-                                     body: "真正的通知来自系统通知数据库；点击卡片会打开发通知的应用。",
-                                     icon: NSApp.applicationIconImage, appURL: nil))
-    }
-
-    @objc private func toggleLogin() {
-        do {
-            if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
-            else { try SMAppService.mainApp.register() }
-        } catch {
-            NSLog("LightningWeather: 登录项设置失败 \(error)")
-        }
-        rebuild()
-    }
+    @objc private func openFullDiskAccess() { app.openFullDiskAccess() }
+    @objc private func testCard() { app.showTestCard() }
+    @objc private func openSettings() { app.showSettings() }
+    @objc private func toggleLogin() { app.toggleLoginItem() }
 }

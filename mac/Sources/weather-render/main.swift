@@ -12,6 +12,18 @@ import RainLayers
 //   mixer.wav               20 秒，经过实时混音器 StormMixer（与应用播放走同一条路径）
 //   rain_*.png              雨景截图（同一个 RainLayerRenderer，叠在系统壁纸或渐变背景上）
 
+// 打包用：weather-render --icon <AppIcon.iconset 目录>
+if CommandLine.arguments.count > 2 && CommandLine.arguments[1] == "--icon" {
+    do {
+        try AppIcon.writeIconset(to: URL(fileURLWithPath: CommandLine.arguments[2]))
+        print("图标已写出")
+        exit(0)
+    } catch {
+        print("写图标失败：\(error)")
+        exit(1)
+    }
+}
+
 let outDir = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "render-out")
 try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 let sr = AudioAnalysis.sr
@@ -141,3 +153,7 @@ renderScene(name: "rain_light.png", mode: .rain, intensity: 0.55, strikeSeed: ni
 renderScene(name: "rain_storm.png", mode: .storm, intensity: 1, strikeSeed: nil, afterStrike: 0)
 renderScene(name: "rain_storm_flash.png", mode: .storm, intensity: 1, strikeSeed: 2024, afterStrike: 0.03)
 renderScene(name: "rain_storm_afterglow.png", mode: .storm, intensity: 1, strikeSeed: 2024, afterStrike: 0.4)
+
+// 应用图标预览
+if let icon = AppIcon.png(size: 1024) { write(icon, "icon_1024.png") }
+if let small = AppIcon.png(size: 64) { write(small, "icon_64.png") }

@@ -99,16 +99,36 @@ public final class NotificationDatabase {
 
     /// 记录号大于 afterID 的通知，按时间顺序。
     public func records(after afterID: Int64, limit: Int = 50) throws -> [DeliveredNotification] {
+        try query("WHERE r.rec_id > ?1 ORDER BY r.rec_id LIMIT ?2", afterID, nil, limit)
+    }
+
+    /// 记录号大于 afterID、或在 since 之后送达的通知。
+    /// 通知被清掉后 SQLite 会复用最大的记录号，只按记录号找会漏掉新通知，所以同时按送达时间找，由调用方去重。
+    public func records(after afterID: Int64, orDeliveredSince since: Date, limit: Int = 50) throws -> [DeliveredNotification] {
+        try query("WHERE r.rec_id > ?1 OR r.delivered_date >= ?3 ORDER BY r.rec_id LIMIT ?2", afterID, since, limit)
+    }
+
+    /// 库里一共有多少条通知（诊断用）。
+    public func count() throws -> Int {
+        var stmt: OpaquePointer?
+        try check(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM record", -1, &stmt, nil))
+        defer { sqlite3_finalize(stmt) }
+        let rc = sqlite3_step(stmt)
+        try check(rc)
+        return rc == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : 0
+    }
+
+    private func query(_ clause: String, _ afterID: Int64, _ since: Date?, _ limit: Int) throws -> [DeliveredNotification] {
         let sql = """
             SELECT r.rec_id, IFNULL(a.identifier, ''), r.data, r.delivered_date
             FROM record r LEFT JOIN app a ON a.app_id = r.app_id
-            WHERE r.rec_id > ? ORDER BY r.rec_id LIMIT ?
-            """
+            """ + " " + clause
         var stmt: OpaquePointer?
         try check(sqlite3_prepare_v2(db, sql, -1, &stmt, nil))
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, afterID)
         sqlite3_bind_int64(stmt, 2, Int64(limit))
+        if let since { sqlite3_bind_double(stmt, 3, since.timeIntervalSinceReferenceDate) }
 
         var out: [DeliveredNotification] = []
         while true {
@@ -141,7 +161,10 @@ public final class NotificationDatabase {
               let obj = try? PropertyListSerialization.propertyList(from: blob, options: [], format: nil),
               let dict = obj as? [String: Any] else { return (nil, "", "", "", nil) }
         let req = dict["req"] as? [String: Any] ?? [:]
-        func str(_ key: String) -> String { (req[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+        // 以防系统改了键的位置：req 里没有就到顶层找
+        func str(_ key: String) -> String {
+            ((req[key] ?? dict[key]) as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
         var date: Date?
         if let d = dict["date"] as? Double { date = Date(timeIntervalSinceReferenceDate: d) }
         else if let d = dict["date"] as? Date { date = d }

@@ -13,6 +13,8 @@ final class NotificationController {
     private let settings: () -> Settings
     private var timer: Timer?
     private var lastID: Int64?
+    /// 已经处理过的通知（记录号 + 送达时间），配合按送达时间查询去重。
+    private var seen = Set<String>()
     private var cards: [NotificationCard] = []
     private let queue = DispatchQueue(label: "LightningWeather.notifications", qos: .utility)
     private var db: NotificationDatabase?
@@ -20,6 +22,8 @@ final class NotificationController {
 
     /// 读库状态，菜单里据此提示去开“完全磁盘访问权限”。
     private(set) var access: NotificationAccess = .notFound
+    /// 给设置窗口看的一行状态，如“正常 · 库里 52 条 · 最近：微信 14:03”。
+    private(set) var statusText = "正在检查…"
     var onAccessChanged: (() -> Void)?
 
     init(settings: @escaping () -> Settings) {
@@ -35,6 +39,21 @@ final class NotificationController {
         poll()
     }
 
+    private struct PollResult {
+        var database: NotificationDatabase?
+        var access: NotificationAccess
+        var rows: [DeliveredNotification] = []
+        var lastID: Int64?
+        var focus = false
+        var total = 0
+        var error: String?
+        var seeding = false
+    }
+
+    private static func key(_ n: DeliveredNotification) -> String {
+        "\(n.recordID)|\(n.delivered?.timeIntervalSinceReferenceDate ?? 0)"
+    }
+
     private func poll() {
         guard !busy else { return }
         busy = true
@@ -42,52 +61,76 @@ final class NotificationController {
         let existing = db
         queue.async { [weak self] in
             // 没打开过、或者上次没权限，就再试一次（用户可能刚在系统设置里授权）
-            var database = existing
-            var access = NotificationAccess.ok
-            if database == nil { (database, access) = NotificationDatabase.openSystem() }
-            var fresh: [DeliveredNotification] = []
-            var newLast = previous
-            var focus = false
-            if let opened = database {
+            var r = PollResult(database: existing, access: .ok, lastID: previous)
+            if r.database == nil { (r.database, r.access) = NotificationDatabase.openSystem() }
+            if let opened = r.database {
                 do {
-                    if let previous {
-                        fresh = try opened.records(after: previous)
-                        if let last = fresh.last { newLast = last.recordID }
-                    } else {
-                        // 第一轮只记下已有的通知，不把通知中心里的旧消息重新弹一遍
-                        newLast = try opened.maxRecordID()
-                    }
-                    if !fresh.isEmpty { focus = FocusState.isFocusActive() }
+                    let since = Date().addingTimeInterval(-NotificationController.maxAge * 2)
+                    r.seeding = previous == nil
+                    let maxID = try opened.maxRecordID()
+                    r.rows = try opened.records(after: previous ?? maxID, orDeliveredSince: since)
+                    r.lastID = max(previous ?? 0, maxID)
+                    r.total = try opened.count()
+                    if !r.rows.isEmpty { r.focus = FocusState.isFocusActive() }
                 } catch {
-                    access = .denied
-                    database = nil
+                    r.access = .denied
+                    r.error = "\(error)"
+                    r.database = nil
                 }
             }
-            let result = (database, access, fresh, newLast, focus)
+            let result = r
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.finish(result) }
             }
         }
     }
 
-    private func finish(_ r: (NotificationDatabase?, NotificationAccess, [DeliveredNotification], Int64?, Bool)) {
-        let (database, access, fresh, newLast, focus) = r
+    private func finish(_ r: PollResult) {
         busy = false
-        db = database
-        lastID = newLast
-        if access != self.access {
-            self.access = access
+        if r.access != access || (db == nil) != (r.database == nil) {
+            Log.write("通知库：\(r.access)，\(r.database?.url.path ?? "未打开")\(r.error.map { "，错误：\($0)" } ?? "")")
+        }
+        db = r.database
+        lastID = r.lastID
+        if r.access != access {
+            access = r.access
             onAccessChanged?()
         }
-        guard settings().glassNotifications, !focus else { return }
+
+        let fresh = r.rows.filter { seen.insert(Self.key($0)).inserted }
+        if seen.count > 2000 { seen = Set(r.rows.map(Self.key)) }
+        switch access {
+        case .ok: statusText = "正常读取 · 库里共 \(r.total) 条" + (lastShown.map { " · 最近显示：\($0)" } ?? "")
+        case .denied: statusText = "没有权限：请在“完全磁盘访问权限”里加入闪电天气"
+        case .notFound: statusText = "找不到系统通知数据库"
+        }
+        // 第一轮只记下已有的通知，不把通知中心里的旧消息重新弹一遍
+        if r.seeding { return }
+
+        let enabled = settings().glassNotifications
         let ownID = Bundle.main.bundleIdentifier?.lowercased()
         for n in fresh {
-            if n.bundleID.lowercased() == ownID { continue }
-            if let d = n.delivered, Date().timeIntervalSince(d) > Self.maxAge { continue }
-            if n.title.isEmpty && n.body.isEmpty { continue }   // 没有文字的静默通知
-            show(NotificationCard.Content(notification: n))
+            let age = n.delivered.map { Date().timeIntervalSince($0) }
+            var skip: String?
+            if n.bundleID.lowercased() == ownID { skip = "本应用" }
+            else if !enabled { skip = "玻璃通知已关闭" }
+            else if r.focus { skip = "专注模式" }
+            else if let age, age > Self.maxAge { skip = "太旧（\(Int(age)) 秒前）" }
+            else if n.title.isEmpty && n.body.isEmpty { skip = "没有文字" }
+            Log.write("新通知 #\(n.recordID) \(n.bundleID) 标题“\(n.title.prefix(20))” → \(skip.map { "跳过：\($0)" } ?? "显示")")
+            if skip != nil { continue }
+            let content = NotificationCard.Content(notification: n)
+            lastShown = "\(content.appName) \(Self.timeFormatter.string(from: Date()))"
+            show(content)
         }
     }
+
+    private var lastShown: String?
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
 
     // MARK: 卡片
 

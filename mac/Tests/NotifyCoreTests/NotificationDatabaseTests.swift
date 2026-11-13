@@ -67,6 +67,31 @@ final class NotificationDatabaseTests: XCTestCase {
         XCTAssertTrue(try db.records(after: 12).isEmpty)
     }
 
+    /// 通知被清掉后 SQLite 复用最大记录号：只按记录号会漏掉，按送达时间能找回来。
+    func testReusedRecordIDFoundByDeliveryTime() throws {
+        let url = try makeDB()
+        var raw: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &raw), SQLITE_OK)
+        let now = Date().timeIntervalSinceReferenceDate
+        let data = try blob(app: "com.apple.mail", title: "复用编号的新邮件", body: "正文", date: now)
+        XCTAssertEqual(sqlite3_exec(raw, "DELETE FROM record WHERE rec_id = 12", nil, nil, nil), SQLITE_OK)
+        var stmt: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(raw, "INSERT INTO record (app_id, data, delivered_date) VALUES (1, ?, ?)", -1, &stmt, nil), SQLITE_OK)
+        _ = data.withUnsafeBytes { sqlite3_bind_blob(stmt, 1, $0.baseAddress, Int32(data.count), unsafeBitCast(-1, to: sqlite3_destructor_type.self)) }
+        sqlite3_bind_double(stmt, 2, now)
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_DONE)
+        sqlite3_finalize(stmt)
+        sqlite3_close(raw)
+
+        let db = try XCTUnwrap(NotificationDatabase(url: url))
+        XCTAssertEqual(try db.maxRecordID(), 12, "SQLite 复用了 12")
+        XCTAssertTrue(try db.records(after: 12).isEmpty, "只按记录号会漏掉")
+        let found = try db.records(after: 12, orDeliveredSince: Date().addingTimeInterval(-60))
+        XCTAssertTrue(found.contains { $0.title == "复用编号的新邮件" })
+        XCTAssertFalse(found.contains { $0.title == "旧邮件" }, "一小时前的不应出现")
+        XCTAssertEqual(try db.count(), 3)
+    }
+
     func testParseGarbageIsEmpty() {
         let p = NotificationDatabase.parse(blob: Data([1, 2, 3]))
         XCTAssertNil(p.app)
