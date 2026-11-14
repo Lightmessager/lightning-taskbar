@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using LightningTaskbar.Audio;
 using LightningTaskbar.Desktop;
 
@@ -28,6 +28,40 @@ public partial class App : Application
             return;
         }
 
+        // 通知边缘特效在独立的短命子进程里播放（见 NotificationCenter.PlayEdge），播完就退出
+        int ei = Array.IndexOf(e.Args, "--edge-effect");
+        if (ei >= 0 && ei + 1 < e.Args.Length)
+        {
+            RunEdgeEffect(e.Args[ei + 1], e.Args.Contains("--allow-capture"));
+            return;
+        }
+
+        int fi = Array.IndexOf(e.Args, "--render-frames");
+        if (fi >= 0 && fi + 1 < e.Args.Length)
+        {
+            try { FrameRender.Run(e.Args[fi + 1]); } catch (Exception ex) { Log(ex); }
+            Shutdown();
+            return;
+        }
+
+        int st = Array.IndexOf(e.Args, "--stress-scene");
+        if (st >= 0 && st + 1 < e.Args.Length)
+        {
+            try { FrameRender.Stress(int.Parse(e.Args[st + 1]), st + 2 < e.Args.Length ? e.Args[st + 2] : null); Log("stress ok"); }
+            catch (Exception ex) { Log(ex); }
+            Shutdown();
+            return;
+        }
+
+        int gi = Array.IndexOf(e.Args, "--render-gale");
+        if (gi >= 0 && gi + 4 < e.Args.Length)
+        {
+            float F(int i) => float.TryParse(e.Args[i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+            RainRender.RunGale(e.Args[gi + 1], F(gi + 2), F(gi + 3), F(gi + 4));
+            Shutdown();
+            return;
+        }
+
         int si = Array.IndexOf(e.Args, "--render-scene");
         if (si >= 0 && si + 1 < e.Args.Length)
         {
@@ -53,8 +87,7 @@ public partial class App : Application
         base.OnStartup(e);
 
         var settings = Settings.Load();
-        if (e.Args.Contains("--rain")) settings.Mode = WeatherMode.Rain;
-        if (e.Args.Contains("--storm")) settings.Mode = WeatherMode.Storm;
+        if (WeatherModes.FromArgs(e.Args) is { } argMode) settings.Mode = argMode;
         WeatherEngine.Instance.Start(settings);
         Glass.GlassSurface.AllowCapture = settings.AllowScreenshots;
 
@@ -73,6 +106,21 @@ public partial class App : Application
         ListenForShowSignal(bar);
         Notifications = new Notifications.NotificationCenter();
         Notifications.Start();
+    }
+
+    void RunEdgeEffect(string styleName, bool allowCapture)
+    {
+        // 子进程里任何错误都只是少播一次特效，直接退出
+        DispatcherUnhandledException += (_, a) => { a.Handled = true; Shutdown(); };
+        if (!Enum.TryParse<EdgeStyle>(styleName, true, out var style)) { Shutdown(); return; }
+        Glass.GlassSurface.AllowCapture = allowCapture;
+        var win = new Notifications.EdgeEffectWindow();
+        win.Finished += Shutdown;
+        // 保险：无论如何 8 秒后退出
+        var guard = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
+        guard.Tick += (_, _) => Shutdown();
+        guard.Start();
+        win.Play(style);
     }
 
     internal bool AppearanceOpen => _appearance?.IsVisible == true;

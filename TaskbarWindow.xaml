@@ -445,7 +445,7 @@
                 </Popup>
 
                 <Button x:Name="WeatherButton" Style="{StaticResource GlassButton}" Width="46" Height="46" Click="Weather_Click"
-                        ToolTip="切换天气：晴 / 雨 / 雷雨">
+                        ToolTip="选择天气：晴 / 雨 / 雷雨 / 小雪 / 中雪 / 暴雪 / 龙卷风">
                     <TextBlock x:Name="WeatherGlyph" FontFamily="Segoe UI Emoji" FontSize="20" Text="⛈"/>
                 </Button>
                 <Button x:Name="SoundButton" Style="{StaticResource GlassButton}" Width="46" Height="46" Click="Sound_Click"
@@ -472,11 +472,24 @@
                 <MenuItem x:Name="MenuOff" Header="☁  晴（关闭天气）" Click="MenuMode_Click" Tag="Off" IsCheckable="True"/>
                 <MenuItem x:Name="MenuRain" Header="🌧  下雨" Click="MenuMode_Click" Tag="Rain" IsCheckable="True"/>
                 <MenuItem x:Name="MenuStorm" Header="⛈  雷雨" Click="MenuMode_Click" Tag="Storm" IsCheckable="True"/>
+                <MenuItem x:Name="MenuLightSnow" Header="🌨  小雪" Click="MenuMode_Click" Tag="LightSnow" IsCheckable="True"/>
+                <MenuItem x:Name="MenuSnow" Header="❄  中雪" Click="MenuMode_Click" Tag="Snow" IsCheckable="True"/>
+                <MenuItem x:Name="MenuBlizzard" Header="🌬  暴雪" Click="MenuMode_Click" Tag="Blizzard" IsCheckable="True"/>
+                <MenuItem x:Name="MenuTornado" Header="🌪  龙卷风" Click="MenuMode_Click" Tag="Tornado" IsCheckable="True"/>
                 <Separator/>
-                <MenuItem x:Name="MenuSound" Header="雷雨音效" IsCheckable="True" Click="MenuSound_Click"/>
+                <MenuItem x:Name="MenuSound" Header="天气音效" IsCheckable="True" Click="MenuSound_Click"/>
                 <MenuItem x:Name="MenuGlass" Header="真玻璃折射（截图 / 录屏时不显示任务栏）" IsCheckable="True" Click="MenuGlass_Click"/>
                 <MenuItem x:Name="MenuExplorer" Header="资源管理器玻璃背景" IsCheckable="True" Click="MenuExplorer_Click"/>
                 <MenuItem Header="⚡ 来一道闪电" Click="MenuStrike_Click"/>
+                <MenuItem Header="🔔 试一条通知（含边缘特效）" Click="MenuTestNotify_Click"/>
+                <MenuItem Header="✨ 预览通知边缘特效">
+                    <MenuItem Header="按当前天气" Click="MenuEdge_Click" Tag=""/>
+                    <Separator/>
+                    <MenuItem Header="紫蓝粉流光（晴 / 雨）" Click="MenuEdge_Click" Tag="Glow"/>
+                    <MenuItem Header="流光 + 闪电（雷雨）" Click="MenuEdge_Click" Tag="StormGlow"/>
+                    <MenuItem Header="淡淡的霜雾（下雪）" Click="MenuEdge_Click" Tag="Frost"/>
+                    <MenuItem Header="落叶（龙卷风）" Click="MenuEdge_Click" Tag="Leaves"/>
+                </MenuItem>
                 <Separator/>
                 <MenuItem Header="外观与通知设置…" Click="MenuAppearance_Click"/>
                 <Separator/>

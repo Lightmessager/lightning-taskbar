@@ -26,6 +26,28 @@ internal static class RainRender
     }
 
     /// <summary>
+    /// 大风：20 秒，风声 + 呼啸（暴雪）+ 轰鸣（龙卷风），参数和程序里一样。
+    /// 用法：LightningTaskbar.exe --render-gale 输出.wav 底风0..1 呼啸0..1 轰鸣0..1
+    /// </summary>
+    public static void RunGale(string wavPath, float wind, float howl, float roar)
+    {
+        int n = SR * 20;
+        var w = new WindSynth(31);
+        var g = new GaleSynth(32);
+        var l = new float[n];
+        var r = new float[n];
+        for (int i = 0; i < n; i++)
+        {
+            w.Next(wind, out var a, out var b);
+            g.Next(howl, roar, out var c, out var d);
+            l[i] = a + c;
+            r[i] = b + d;
+        }
+        WriteWav(wavPath, l, r);
+        File.WriteAllText(Path.ChangeExtension(wavPath, ".txt"), Analyze(l, Math.Max(wind, Math.Max(howl, roar))), Encoding.UTF8);
+    }
+
+    /// <summary>
     /// 70 秒完整场景：雷雨 + 一阵风（10~50 秒）+ 三声雷（5、30、55 秒），
     /// 并单独分析雷声与风声的频谱、起音陡峭程度。
     /// </summary>
