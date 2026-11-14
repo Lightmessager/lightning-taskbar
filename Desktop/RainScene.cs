@@ -6,7 +6,7 @@ using System.Windows.Media.Imaging;
 
 namespace LightningTaskbar.Desktop;
 
-/// <summary>桌面层的雷雨场景：壁纸 + 压暗 + 多层雨丝 + 溅射 + 闪电 + 底部雨雾。</summary>
+/// <summary>桌面层的天气场景：壁纸 + 压暗 + 多层雨丝 + 溅射 + 闪电 + 底部雨雾，再叠上雪（SnowLayer）和龙卷风（TornadoLayer）。</summary>
 internal sealed class RainScene : FrameworkElement
 {
     readonly VisualCollection _children;
@@ -33,6 +33,13 @@ internal sealed class RainScene : FrameworkElement
     readonly List<PointCollection> _bolt = new();
     double _boltT = 99, _boltIntensity, _boltX;
     double[] _pulses = Array.Empty<double>();
+
+    // 雪和龙卷风各自一层，画在雨之后
+    readonly SnowLayer _snow = new();
+    readonly TornadoLayer _tornado = new();
+    /// <summary>调试用：跳过某些层（"snow" / "tornado"）。</summary>
+    internal string SkipLayers { get; set; } = "";
+    bool _layerErrorLogged;
 
     static readonly Color RainColor = Color.FromRgb(205, 225, 255);
     static readonly Pen[] LayerPens =
@@ -233,6 +240,12 @@ internal sealed class RainScene : FrameworkElement
         double now = _clock.Elapsed.TotalSeconds;
         double dt = Math.Min(0.05, now - _last);
         _last = now;
+        Step(dt);
+    }
+
+    /// <summary>推进一帧并重画（离线渲染检查画面时也直接调用它）。</summary>
+    internal void Step(double dt)
+    {
 
         var weather = WeatherEngine.Instance;
         double intensity = weather.Intensity;
@@ -347,6 +360,18 @@ internal sealed class RainScene : FrameworkElement
             dc.PushOpacity(intensity);
             dc.DrawRectangle(FogBrush, null, new Rect(0, h * 0.62, w, h * 0.38));
             dc.Pop();
+        }
+
+        // 新加的两层出错时只丢这一帧（记一次日志），不让异常冒到 Dispatcher 把任务栏带崩
+        // 新加的两层出错时只丢这一帧（只记一次日志），不让异常冒到 Dispatcher 把任务栏带崩
+        try
+        {
+            if (!SkipLayers.Contains("tornado")) _tornado.Render(dc, dt, w, h, k);
+            if (!SkipLayers.Contains("snow")) _snow.Render(dc, dt, w, h, k);
+        }
+        catch (Exception ex) when (!FrameRender.Checking)
+        {
+            if (!_layerErrorLogged) { _layerErrorLogged = true; App.Log(ex); }
         }
     }
 

@@ -31,6 +31,8 @@ public partial class AppearanceWindow : Window
             long ex = Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE).ToInt64();
             Native.SetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE, new IntPtr(ex | Native.WS_EX_TOOLWINDOW));
         };
+        // 从任务栏按钮或菜单换了天气，面板开着时同步高亮
+        WeatherEngine.Instance.ModeChanged += () => { _syncing = true; SyncWeather(); _syncing = false; };
     }
 
     public void Open()
@@ -83,6 +85,8 @@ public partial class AppearanceWindow : Window
         GlassSlider.Value = S.DockGlass;
         NotifyToggle.IsChecked = S.GlassNotifications;
         CaptureToggle.IsChecked = S.AllowScreenshots;
+        EdgeToggle.IsChecked = S.EdgeEffect;
+        SyncWeather();
         NotifyState.Text = AppInstance.Notifications.Available
             ? "读取系统通知，免打扰和全屏时不弹出"
             : "没有读取通知的权限：设置 → 隐私和安全性 → 通知";
@@ -170,13 +174,25 @@ public partial class AppearanceWindow : Window
         S.Save();
     }
 
-    void TestNotify_Click(object sender, RoutedEventArgs e) =>
-        AppInstance.Notifications.Show(new Notifications.NotificationInfo
-        {
-            AppName = "Lightning Taskbar",
-            Title = "这是一条测试通知",
-            Body = "真实通知会以同样的样式显示在这里，6 秒后自动收起，鼠标停在上面时不会消失。",
-        });
+    void TestNotify_Click(object sender, RoutedEventArgs e) => AppInstance.Notifications.ShowTest();
+
+    void Edge_Click(object sender, RoutedEventArgs e)
+    {
+        S.EdgeEffect = EdgeToggle.IsChecked == true;
+        S.Save();
+    }
+
+    void Weather_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_syncing) return;
+        if (((FrameworkElement)sender).Tag is string tag) WeatherEngine.Instance.SetMode(Enum.Parse<WeatherMode>(tag));
+    }
+
+    void SyncWeather()
+    {
+        foreach (var rb in WeatherPanel.Children.OfType<System.Windows.Controls.RadioButton>())
+            rb.IsChecked = (string)rb.Tag == WeatherEngine.Instance.Mode.ToString();
+    }
 
     void OnDeactivated(object sender, EventArgs e) => Hide();
 

@@ -4,7 +4,65 @@ using System.Windows.Threading;
 
 namespace LightningTaskbar;
 
-public enum WeatherMode { Off, Rain, Storm }
+/// <summary>
+/// 天气模式。settings.json 里按数字保存，新模式只能追加在末尾，旧文件（0/1/2）才能照常读取。
+/// </summary>
+public enum WeatherMode { Off, Rain, Storm, LightSnow, Snow, Blizzard, Tornado }
+
+/// <summary>通知边缘特效的样式，随天气变化。</summary>
+public enum EdgeStyle { Glow, StormGlow, Frost, Leaves }
+
+public static class WeatherModes
+{
+    /// <summary>菜单和按钮循环的顺序。</summary>
+    public static readonly WeatherMode[] All =
+        { WeatherMode.Off, WeatherMode.Rain, WeatherMode.Storm, WeatherMode.LightSnow, WeatherMode.Snow, WeatherMode.Blizzard, WeatherMode.Tornado };
+
+    public static string Glyph(this WeatherMode m) => m switch
+    {
+        WeatherMode.Off => "☁", WeatherMode.Rain => "🌧", WeatherMode.Storm => "⛈",
+        WeatherMode.LightSnow => "🌨", WeatherMode.Snow => "❄", WeatherMode.Blizzard => "🌬", WeatherMode.Tornado => "🌪",
+        _ => "☁",
+    };
+
+    public static string Label(this WeatherMode m) => m switch
+    {
+        WeatherMode.Off => "晴（关闭天气）", WeatherMode.Rain => "下雨", WeatherMode.Storm => "雷雨",
+        WeatherMode.LightSnow => "小雪", WeatherMode.Snow => "中雪", WeatherMode.Blizzard => "暴雪", WeatherMode.Tornado => "龙卷风",
+        _ => m.ToString(),
+    };
+
+    public static string ShortLabel(this WeatherMode m) => m == WeatherMode.Off ? "晴" : m.Label();
+
+    public static bool IsSnow(this WeatherMode m) => m is WeatherMode.LightSnow or WeatherMode.Snow or WeatherMode.Blizzard;
+
+    public static EdgeStyle Edge(this WeatherMode m) => m switch
+    {
+        WeatherMode.Storm => EdgeStyle.StormGlow,
+        WeatherMode.Tornado => EdgeStyle.Leaves,
+        _ when m.IsSnow() => EdgeStyle.Frost,
+        _ => EdgeStyle.Glow,
+    };
+
+    /// <summary>启动参数：--rain / --storm / --snow-light / --snow / --blizzard / --tornado / --clear。</summary>
+    public static WeatherMode? FromArgs(IEnumerable<string> args)
+    {
+        WeatherMode? m = null;
+        foreach (var a in args)
+            m = a.ToLowerInvariant() switch
+            {
+                "--clear" or "--sunny" or "--off" => WeatherMode.Off,
+                "--rain" => WeatherMode.Rain,
+                "--storm" => WeatherMode.Storm,
+                "--snow-light" or "--light-snow" => WeatherMode.LightSnow,
+                "--snow" => WeatherMode.Snow,
+                "--blizzard" => WeatherMode.Blizzard,
+                "--tornado" => WeatherMode.Tornado,
+                _ => m,
+            };
+        return m;
+    }
+}
 
 /// <summary>Dock = 居中悬浮、带倒影和放大；Classic = 通栏胶囊。</summary>
 public enum BarTheme { Dock, Classic }
@@ -41,6 +99,8 @@ public sealed class Settings
     public bool AllowScreenshots { get; set; }
     /// <summary>在右上角用玻璃卡片显示系统通知。</summary>
     public bool GlassNotifications { get; set; } = true;
+    /// <summary>来通知时屏幕四周的天气特效（紫蓝粉光 / 结霜 / 落叶）。</summary>
+    public bool EdgeEffect { get; set; } = true;
     /// <summary>从开始菜单固定到任务栏的应用的显示名（键为固定项路径）。</summary>
     public Dictionary<string, string> PinTitles { get; set; } = new();
     /// <summary>在闪电开始菜单里额外固定的应用（AppEntry.ParsingName）。</summary>
@@ -107,6 +167,14 @@ public sealed class WeatherEngine
     public double Wind { get; private set; } = 0.1;
     /// <summary>阵风 0..1：大部分时间为 0，偶尔起一阵、持续一段时间再慢慢平息（只用于风声）。</summary>
     public double Gust { get; private set; }
+    /// <summary>雪量 0..1：小雪 0.3、中雪 0.6、暴雪 1。</summary>
+    public double Snow { get; private set; }
+    /// <summary>暴雪程度 0..1（白茫茫、呼啸声），只有暴雪模式趋向 1。</summary>
+    public double Blizzard { get; private set; }
+    /// <summary>龙卷风 0..1。</summary>
+    public double Tornado { get; private set; }
+    /// <summary>持续的底风 0..1（雪天的轻风、暴雪和龙卷风的强风），叠加在阵风之上。</summary>
+    public double BaseWind { get; private set; }
 
     public event Action ModeChanged;
     public event Action<LightningStrike> Lightning;
@@ -142,21 +210,45 @@ public sealed class WeatherEngine
     double _windTarget = 0.1, _gustTarget;
     DateTime _gustUntil = DateTime.MinValue, _nextGust = DateTime.Now.AddSeconds(40);
 
-    void Tick(double dt)
+    internal void Tick(double dt)
     {
         double target = Mode switch { WeatherMode.Storm => 1.0, WeatherMode.Rain => 0.55, _ => 0 };
         Intensity += (target - Intensity) * Math.Min(1, dt * 0.6);
         if (Math.Abs(target - Intensity) < 0.002) Intensity = target;
 
-        if (_rng.NextDouble() < dt * 0.08) _windTarget = (Mode == WeatherMode.Storm ? 0.2 : 0.08) * (_rng.NextDouble() * 1.6 - 0.3);
+        Snow = Approach(Snow, Mode switch { WeatherMode.LightSnow => 0.3, WeatherMode.Snow => 0.6, WeatherMode.Blizzard => 1.0, _ => 0 }, dt * 0.5);
+        Blizzard = Approach(Blizzard, Mode == WeatherMode.Blizzard ? 1 : 0, dt * 0.35);
+        Tornado = Approach(Tornado, Mode == WeatherMode.Tornado ? 1 : 0, dt * 0.3);
+        BaseWind = Approach(BaseWind, Mode switch
+        {
+            WeatherMode.LightSnow => 0.12, WeatherMode.Snow => 0.2, WeatherMode.Blizzard => 0.62, WeatherMode.Tornado => 0.5, _ => 0,
+        }, dt * 0.3);
+
+        if (_rng.NextDouble() < dt * 0.08)
+            _windTarget = Mode switch
+            {
+                // 暴雪：横着刮，方向基本固定，只有强弱起伏
+                WeatherMode.Blizzard => 0.75 + _rng.NextDouble() * 0.5,
+                WeatherMode.Tornado => (_rng.NextDouble() * 2 - 1) * 0.5,
+                WeatherMode.Snow or WeatherMode.LightSnow => (_rng.NextDouble() * 2 - 0.6) * 0.25,
+                WeatherMode.Storm => 0.2 * (_rng.NextDouble() * 1.6 - 0.3),
+                _ => 0.08 * (_rng.NextDouble() * 1.6 - 0.3),
+            };
         Wind += (_windTarget - Wind) * dt * 0.3;
 
         var now = DateTime.Now;
         if (Mode != WeatherMode.Off && now >= _nextGust)
         {
-            _gustTarget = (Mode == WeatherMode.Storm ? 0.55 : 0.3) * (0.6 + _rng.NextDouble() * 0.4);
+            double strength = Mode switch
+            {
+                WeatherMode.Storm => 0.55, WeatherMode.Blizzard => 0.75, WeatherMode.Tornado => 0.85,
+                WeatherMode.LightSnow or WeatherMode.Snow => 0.22, _ => 0.3,
+            };
+            _gustTarget = strength * (0.6 + _rng.NextDouble() * 0.4);
             _gustUntil = now.AddSeconds(8 + _rng.NextDouble() * 14);
-            _nextGust = _gustUntil.AddSeconds(45 + _rng.NextDouble() * 90);
+            // 暴雪和龙卷风阵风更频繁
+            double pause = Mode is WeatherMode.Blizzard or WeatherMode.Tornado ? 8 + _rng.NextDouble() * 20 : 45 + _rng.NextDouble() * 90;
+            _nextGust = _gustUntil.AddSeconds(pause);
         }
         if (now >= _gustUntil || Mode == WeatherMode.Off) _gustTarget = 0;
         // 起风快一点，停风慢一点
@@ -177,6 +269,12 @@ public sealed class WeatherEngine
         // 越亮越近，雷声延迟越短
         double delay = (1.0 - intensity) * 3.2 + _rng.NextDouble() * 0.4;
         Lightning?.Invoke(new LightningStrike(0.08 + _rng.NextDouble() * 0.84, intensity, delay, _rng.Next()));
+    }
+
+    static double Approach(double v, double target, double rate)
+    {
+        v += (target - v) * Math.Min(1, rate);
+        return Math.Abs(target - v) < 0.002 ? target : v;
     }
 
     void ScheduleNext(double min, double max) =>
