@@ -4,16 +4,24 @@ using System.Windows.Media;
 namespace LightningTaskbar.Desktop;
 
 /// <summary>
-/// 桌面雪景：四层景深的雪花（飘落 + 左右摆动，暴雪时被风横着吹），
-/// 雪天的冷灰天色、暴雪的白茫茫雪雾，以及底部慢慢堆起来的积雪。
-/// 雪花按景深和大小分桶，每桶一个 StreamGeometry（圆头短线 = 圆点，速度快时自然拉成雪线）。
+/// 桌面雪景。刻意做得稀疏、柔和（满屏均匀的小硬点会让人不适）：
+/// 近处只有少量大的六角雪花，半透明、边缘带柔光、慢慢翻转着飘；
+/// 中景是柔边的绒雪；远处是极淡的细雪。暴雪不拉斜线，而是靠白茫茫的雪幕和随风掠过的雪雾表现。
+/// 底部会慢慢堆起积雪，停雪后慢慢化掉。
 /// </summary>
 internal sealed class SnowLayer
 {
-    struct Flake { public double X, Y, Z, Phase, SwayAmp, SwayFreq; public int Bucket; }
+    enum Kind { Faint, Fluffy, Crystal }
 
-    const int MaxFlakes = 1700;
-    const int Layers = 4, SizesPerLayer = 2, Buckets = Layers * SizesPerLayer;
+    struct Flake
+    {
+        public double X, Y, Z, Size, Phase, SwayAmp, SwayFreq, Angle, Spin, Tilt, TiltSpeed;
+        public Kind Kind;
+        public int Shape, Level;
+    }
+
+    const int MaxFlakes = 260;
+    const int Levels = 4;
 
     readonly Random _rng = new(4242);
     readonly Flake[] _flakes = new Flake[MaxFlakes];
@@ -21,26 +29,81 @@ internal sealed class SnowLayer
     double _time, _accum;
     bool _seeded;
 
-    // 积雪的起伏轮廓（固定的几组正弦叠加，像被风堆出来的雪坡）
+    // 积雪的起伏轮廓
     readonly double[] _driftFreq = new double[5], _driftPhase = new double[5], _driftAmp = new double[5];
 
     // 雪雾团：几团大的柔光椭圆随风飘过
     struct Haze { public double X, Y, R, Speed; }
-    readonly Haze[] _haze = new Haze[6];
-
-    Pen[] _pens, _glowPens;
-    double _penK;
+    readonly Haze[] _haze = new Haze[7];
 
     static readonly Brush SnowBank = Frozen(new LinearGradientBrush(new GradientStopCollection
     {
-        new(Color.FromArgb(250, 250, 252, 255), 0),
-        new(Color.FromArgb(245, 228, 236, 248), 0.35),
-        new(Color.FromArgb(240, 196, 210, 230), 1),
+        new(Color.FromArgb(235, 248, 250, 255), 0),
+        new(Color.FromArgb(225, 226, 234, 246), 0.35),
+        new(Color.FromArgb(215, 196, 210, 230), 1),
     }, 90));
-    static readonly Pen SnowBankRim = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)), 1.5));
-    static readonly Brush HazeBrush = Frozen(new RadialGradientBrush(Color.FromArgb(150, 236, 242, 250), Color.FromArgb(0, 236, 242, 250)));
+    static readonly Brush HazeBrush = Frozen(new RadialGradientBrush(Color.FromArgb(140, 236, 242, 250), Color.FromArgb(0, 236, 242, 250)));
     static readonly Brush GroundMist = Frozen(new LinearGradientBrush(
         new GradientStopCollection { new(Color.FromArgb(0, 230, 236, 245), 0), new(Color.FromArgb(150, 230, 236, 245), 1) }, 90));
+
+    /// <summary>柔边雪团：中心亮、向外渐隐，没有硬边。按透明度分几档。</summary>
+    static readonly Brush[] SoftFlake = Enumerable.Range(0, Levels).Select(i =>
+    {
+        byte a = (byte)(90 + i * 45);
+        return Frozen(new RadialGradientBrush(new GradientStopCollection
+        {
+            new(Color.FromArgb(a, 255, 255, 255), 0),
+            new(Color.FromArgb((byte)(a * 0.7), 248, 251, 255), 0.35),
+            new(Color.FromArgb((byte)(a * 0.25), 240, 246, 255), 0.7),
+            new(Color.FromArgb(0, 240, 246, 255), 1),
+        }));
+    }).ToArray();
+
+    /// <summary>六角雪花的柔光底。</summary>
+    static readonly Brush CrystalHalo = Frozen(new RadialGradientBrush(Color.FromArgb(40, 235, 244, 255), Color.FromArgb(0, 235, 244, 255)));
+
+    /// <summary>两种六角雪花（单位尺寸，半径 0.5）：枝状和星盘状。</summary>
+    static readonly Geometry[] Crystals = { BuildCrystal(dendrite: true), BuildCrystal(dendrite: false) };
+    static readonly Pen CrystalPen = FrozenPen(new Pen(new SolidColorBrush(Color.FromArgb(150, 250, 252, 255)), 0.045)
+    { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round });
+
+    static Geometry BuildCrystal(bool dendrite)
+    {
+        var g = new StreamGeometry();
+        using (var c = g.Open())
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                double a = i * Math.PI / 3;
+                var dir = new Vector(Math.Cos(a), Math.Sin(a));
+                var perp = new Vector(-dir.Y, dir.X);
+                c.BeginFigure(new Point(0, 0), false, false);
+                c.LineTo((Point)(dir * 0.5), true, false);
+                // 每根主枝上两对侧枝，向外 60°
+                foreach (double t in dendrite ? new[] { 0.22, 0.36 } : new[] { 0.3 })
+                {
+                    double len = dendrite ? (t < 0.3 ? 0.13 : 0.09) : 0.08;
+                    var p = (Point)(dir * t);
+                    c.BeginFigure(p, false, false);
+                    c.LineTo(p + (dir * 0.5 + perp * 0.866) * len, true, false);
+                    c.BeginFigure(p, false, false);
+                    c.LineTo(p + (dir * 0.5 - perp * 0.866) * len, true, false);
+                }
+            }
+            if (!dendrite)
+            {
+                // 星盘：中间一个小六边形
+                for (int i = 0; i <= 6; i++)
+                {
+                    double a = i * Math.PI / 3 + Math.PI / 6;
+                    var p = new Point(Math.Cos(a) * 0.14, Math.Sin(a) * 0.14);
+                    if (i == 0) c.BeginFigure(p, false, true); else c.LineTo(p, true, true);
+                }
+            }
+        }
+        g.Freeze();
+        return g;
+    }
 
     public SnowLayer()
     {
@@ -52,58 +115,54 @@ internal sealed class SnowLayer
         }
     }
 
-    public bool IsIdle => _active == 0 && _accum <= 0.001;
-
-    Flake NewFlake(double w, double h, bool anywhere, double wind)
+    Flake NewFlake(double w, double h, bool anywhere, double windPx)
     {
-        double z = Math.Pow(_rng.NextDouble(), 1.35);   // 远处的小雪花多，近处的大雪花少
-        int layer = Math.Min(Layers - 1, (int)(z * Layers));
+        double r = _rng.NextDouble();
+        // 远处细雪 40%、中景绒雪 48%、近处六角雪花 12%
+        var kind = r < 0.4 ? Kind.Faint : r < 0.88 ? Kind.Fluffy : Kind.Crystal;
+        double z = kind switch
+        {
+            Kind.Faint => 0.1 + _rng.NextDouble() * 0.25,
+            Kind.Fluffy => 0.4 + _rng.NextDouble() * 0.35,
+            _ => 0.8 + _rng.NextDouble() * 0.2,
+        };
         var f = new Flake
         {
+            Kind = kind,
             Z = z,
+            Size = kind switch
+            {
+                Kind.Faint => 2.2 + _rng.NextDouble() * 1.6,     // 半径
+                Kind.Fluffy => 4 + _rng.NextDouble() * 5,
+                _ => 30 + _rng.NextDouble() * 22,                // 直径
+            },
             Phase = _rng.NextDouble() * Math.PI * 2,
-            SwayAmp = 0.4 + _rng.NextDouble() * 1.2,
-            SwayFreq = 0.5 + _rng.NextDouble() * 1.3,
-            Bucket = layer * SizesPerLayer + (_rng.NextDouble() < 0.7 ? 0 : 1),
+            SwayAmp = 0.5 + _rng.NextDouble() * 1.0,
+            SwayFreq = 0.35 + _rng.NextDouble() * 0.8,
+            Angle = _rng.NextDouble() * 60,
+            Spin = (_rng.NextDouble() * 2 - 1) * 25,
+            Tilt = _rng.NextDouble() * Math.PI * 2,
+            TiltSpeed = 0.4 + _rng.NextDouble() * 0.9,
+            Shape = _rng.Next(Crystals.Length),
+            Level = kind == Kind.Faint ? 0 : 1 + _rng.Next(Levels - 1),
         };
         if (anywhere)
         {
             f.X = _rng.NextDouble() * w;
             f.Y = _rng.NextDouble() * h;
         }
-        else if (Math.Abs(wind) > 0.35 && _rng.NextDouble() < Math.Min(0.75, Math.Abs(wind) * 0.7))
+        else if (Math.Abs(windPx) > 120 && _rng.NextDouble() < 0.6)
         {
-            // 横风大时，一部分雪从上风方向的侧边吹进来，否则屏幕一侧会空着
-            f.X = wind > 0 ? -20 : w + 20;
-            f.Y = _rng.NextDouble() * h * 0.9;
+            // 横风大时一部分从上风方向的侧边进来，否则屏幕一侧会空着
+            f.X = windPx > 0 ? -40 : w + 40;
+            f.Y = _rng.NextDouble() * h * 0.85;
         }
         else
         {
-            f.X = _rng.NextDouble() * (w + 400) - 200;
-            f.Y = -10 - _rng.NextDouble() * 60;
+            f.X = _rng.NextDouble() * (w + 200) - 100;
+            f.Y = -40 - _rng.NextDouble() * 60;
         }
         return f;
-    }
-
-    void EnsurePens(double k)
-    {
-        if (_pens != null && Math.Abs(k - _penK) < 0.001) return;
-        _penK = k;
-        _pens = new Pen[Buckets];
-        _glowPens = new Pen[Buckets];
-        // 远 → 近：越近越大越亮
-        double[] size = { 1.5, 2.3, 3.2, 4.6 };
-        byte[] alpha = { 105, 150, 200, 235 };
-        for (int layer = 0; layer < Layers; layer++)
-            for (int s = 0; s < SizesPerLayer; s++)
-            {
-                double px = size[layer] * (s == 0 ? 1 : 1.45) * Math.Max(0.6, k);
-                var b = new SolidColorBrush(Color.FromArgb(alpha[layer], 248, 251, 255));
-                _pens[layer * SizesPerLayer + s] = Frozen(new Pen(b, px) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
-                // 近处的雪花带一圈柔光，像镜头前的失焦雪花
-                var g = new SolidColorBrush(Color.FromArgb((byte)(layer >= 2 ? 34 : 0), 240, 246, 255));
-                _glowPens[layer * SizesPerLayer + s] = Frozen(new Pen(g, px * 2.6) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
-            }
     }
 
     public void Render(DrawingContext dc, double dt, double w, double h, double k)
@@ -117,90 +176,101 @@ internal sealed class SnowLayer
         if (snow > 0.01 && _accum < accumTarget) _accum = Math.Min(accumTarget, _accum + dt * snow * 0.012);
         else if (_accum > accumTarget) _accum = Math.Max(accumTarget, _accum - dt * 0.006);
 
-        int target = (int)(Math.Pow(snow, 1.4) * MaxFlakes);
+        int target = (int)(Math.Pow(snow, 1.2) * MaxFlakes);
+        double wind = weather.Wind, gust = weather.Gust;
+        // 横向风速（px/s）。暴雪的风大，但雪花依然是一片片柔和的雪，不拉成线
+        double windPx = (wind * (40 + 300 * blizzard) + Math.Sign(wind) * gust * 220 * blizzard) * k;
+
         if (!_seeded && target > 0)
         {
             // 第一次（比如启动时就是雪天）直接铺满全屏，不要等雪从顶上慢慢落下来
-            for (int i = 0; i < MaxFlakes; i++) _flakes[i] = NewFlake(w, h, true, weather.Wind);
+            for (int i = 0; i < MaxFlakes; i++) _flakes[i] = NewFlake(w, h, true, windPx);
             _seeded = true;
         }
-        if (_active < target) _active = Math.Min(target, _active + (int)(dt * 260) + 1);
-        else if (_active > target) _active = Math.Max(target, _active - (int)(dt * 500) - 1);
+        if (_active < target) _active = Math.Min(target, _active + (int)(dt * 40) + 1);
+        else if (_active > target) _active = Math.Max(target, _active - (int)(dt * 80) - 1);
 
         if (snow <= 0.001 && _accum <= 0.001 && _active == 0) return;
 
-        // ---- 天色：雪天发灰发冷，暴雪白茫茫 ----
-        double overcast = snow * 0.16;
+        // ---- 天色：雪天微微发灰发冷，暴雪白茫茫 ----
+        double overcast = snow * 0.12;
         if (overcast > 0.004)
             dc.DrawRectangle(new SolidColorBrush(Color.FromArgb((byte)(overcast * 255), 150, 162, 182)), null, new Rect(0, 0, w, h));
-        double white = blizzard * (0.2 + 0.1 * weather.Gust);
+        double white = blizzard * (0.24 + 0.12 * gust);
         if (white > 0.004)
-            dc.DrawRectangle(new SolidColorBrush(Color.FromArgb((byte)(white * 255), 226, 233, 243)), null, new Rect(0, 0, w, h));
+            dc.DrawRectangle(new SolidColorBrush(Color.FromArgb((byte)(white * 255), 228, 234, 243)), null, new Rect(0, 0, w, h));
 
-        EnsurePens(k);
-        double wind = weather.Wind;
-        double gust = weather.Gust;
-        // 横向风速（px/s），暴雪时远大于下落速度
-        double windPx = (wind * (60 + 460 * blizzard) + Math.Sign(wind) * gust * 380 * blizzard) * k;
-
-        // ---- 雪雾团（暴雪）：降低能见度，随风掠过 ----
+        // ---- 雪雾团（暴雪）：降低能见度，随风大片掠过 ----
         if (blizzard > 0.01)
         {
             for (int i = 0; i < _haze.Length; i++)
             {
                 ref var hz = ref _haze[i];
-                if (hz.R == 0 || hz.X - hz.R > w + 50 || hz.X + hz.R < -50)
+                if (hz.R == 0 || hz.X - hz.R * 1.8 > w + 50 || hz.X + hz.R * 1.8 < -50)
                 {
                     bool initial = hz.R == 0;
-                    hz.R = (260 + _rng.NextDouble() * 380) * k;
-                    hz.Y = h * (0.15 + _rng.NextDouble() * 0.8);
-                    hz.Speed = 0.6 + _rng.NextDouble() * 0.7;
-                    hz.X = initial ? _rng.NextDouble() * w : windPx >= 0 ? -hz.R : w + hz.R;
+                    hz.R = (280 + _rng.NextDouble() * 420) * k;
+                    hz.Y = h * (0.1 + _rng.NextDouble() * 0.85);
+                    hz.Speed = 0.8 + _rng.NextDouble() * 0.8;
+                    hz.X = initial ? _rng.NextDouble() * w : windPx >= 0 ? -hz.R * 1.8 : w + hz.R * 1.8;
                 }
-                hz.X += windPx * hz.Speed * dt;
-                double a = blizzard * (0.45 + 0.35 * Math.Sin(_time * 0.4 + i * 1.7)) * (0.7 + 0.5 * gust);
+                hz.X += (windPx * 1.4 + Math.Sign(windPx) * 60 * k) * hz.Speed * dt;
+                double a = blizzard * (0.5 + 0.3 * Math.Sin(_time * 0.4 + i * 1.7)) * (0.75 + 0.5 * gust);
                 dc.PushOpacity(Math.Clamp(a, 0, 1));
-                dc.DrawEllipse(HazeBrush, null, new Point(hz.X, hz.Y), hz.R * 1.6, hz.R * 0.7);
+                dc.DrawEllipse(HazeBrush, null, new Point(hz.X, hz.Y), hz.R * 1.8, hz.R * 0.6);
                 dc.Pop();
             }
         }
 
         // ---- 雪花 ----
-        var geos = new StreamGeometry[Buckets];
-        var ctx = new StreamGeometryContext[Buckets];
-        for (int b = 0; b < Buckets; b++) { geos[b] = new StreamGeometry(); ctx[b] = geos[b].Open(); }
-
-        double fallBoost = 1 + blizzard * 0.9;
+        double fallBoost = 1 + blizzard * 0.6;
         for (int i = 0; i < _active; i++)
         {
             ref var f = ref _flakes[i];
-            double depth = 0.35 + 0.65 * f.Z;                 // 近处的雪看起来更快
-            double vy = (38 + 105 * f.Z) * k * fallBoost;
-            double sway = Math.Cos(_time * f.SwayFreq + f.Phase) * f.SwayAmp * 22 * k * (1 - blizzard * 0.6);
+            double depth = 0.3 + 0.7 * f.Z;                    // 近处看起来更快
+            double vy = (26 + 70 * f.Z) * k * fallBoost;
+            double sway = Math.Cos(_time * f.SwayFreq + f.Phase) * f.SwayAmp * 26 * k * (1 - blizzard * 0.5);
             double vx = windPx * depth + sway;
             f.X += vx * dt;
             f.Y += vy * dt;
+            f.Angle += f.Spin * dt;
+            f.Tilt += f.TiltSpeed * dt;
 
-            if (f.Y > h + 12 || f.X < -260 || f.X > w + 260)
+            double margin = f.Kind == Kind.Crystal ? f.Size * k : 20;
+            if (f.Y > h + margin || f.X < -200 || f.X > w + 200)
             {
-                f = NewFlake(w, h, false, windPx / Math.Max(1, 300 * k));
+                f = NewFlake(w, h, false, windPx);
                 continue;
             }
+            if (FrameRender.Checking && !(double.IsFinite(f.X) && double.IsFinite(f.Y)))
+                throw new InvalidOperationException($"snow NaN x={f.X} y={f.Y}");
 
-            // 拖影：低速时近乎一个圆点，暴雪时拉成短线
-            double blur = 0.006 + 0.022 * blizzard;
-            if (FrameRender.Checking && !(double.IsFinite(f.X) && double.IsFinite(f.Y) && double.IsFinite(vx) && double.IsFinite(vy)))
-                throw new InvalidOperationException($"snow NaN x={f.X} y={f.Y} vx={vx} vy={vy} wind={windPx}");
-            var c = ctx[f.Bucket];
-            c.BeginFigure(new Point(f.X, f.Y), false, false);
-            c.LineTo(new Point(f.X - vx * blur - 0.05, f.Y - vy * blur - 0.05), true, false);
-        }
-        for (int b = 0; b < Buckets; b++) { ctx[b].Close(); geos[b].Freeze(); }
-
-        for (int b = 0; b < Buckets; b++)
-        {
-            if (b >= 2 * SizesPerLayer) dc.DrawGeometry(null, _glowPens[b], geos[b]);
-            dc.DrawGeometry(null, _pens[b], geos[b]);
+            var p = new Point(f.X, f.Y);
+            switch (f.Kind)
+            {
+                case Kind.Faint:
+                case Kind.Fluffy:
+                {
+                    double r = f.Size * Math.Max(0.6, k);
+                    dc.DrawEllipse(SoftFlake[f.Level], null, p, r, r);
+                    break;
+                }
+                case Kind.Crystal:
+                {
+                    double size = f.Size * Math.Max(0.6, k);
+                    dc.DrawEllipse(CrystalHalo, null, p, size * 0.9, size * 0.9);
+                    // 翻转：一个方向按 cos 压扁，看起来像在空中慢慢翻面
+                    double squash = 0.55 + 0.45 * Math.Abs(Math.Cos(f.Tilt));
+                    var m = Matrix.Identity;
+                    m.Scale(size, size * squash);
+                    m.Rotate(f.Angle);
+                    m.Translate(p.X, p.Y);
+                    dc.PushTransform(new MatrixTransform(m));
+                    dc.DrawGeometry(null, CrystalPen, Crystals[f.Shape]);
+                    dc.Pop();
+                    break;
+                }
+            }
         }
 
         // ---- 暴雪的地面吹雪 ----
@@ -244,10 +314,10 @@ internal sealed class SnowLayer
         }
         geo.Freeze();
         dc.PushOpacity(fade);
-        dc.DrawGeometry(SnowBank, SnowBankRim, geo);
+        dc.DrawGeometry(SnowBank, null, geo);
         dc.Pop();
     }
 
-    static Pen Frozen(Pen p) { p.Freeze(); return p; }
     static Brush Frozen(Brush b) { b.Freeze(); return b; }
+    static Pen FrozenPen(Pen p) { p.Freeze(); return p; }
 }

@@ -31,6 +31,7 @@ internal sealed class EdgeEffectWindow : Window
         // 播完不 Hide：反复隐藏 / 显示整屏的分层窗口会让 WPF 反复释放、重建整屏渲染目标，实测会让渲染线程崩溃。
         // 改为清空内容后挪到屏幕外停着（不在屏幕上，也就不会被系统当成全屏程序）。
         _canvas.Finished += Park;
+        _canvas.Finished += () => Finished?.Invoke();
 
         SourceInitialized += (_, _) =>
         {
@@ -42,14 +43,32 @@ internal sealed class EdgeEffectWindow : Window
         };
     }
 
+    /// <summary>一次特效播完。</summary>
+    public event Action Finished;
+
+    uint _affinity = uint.MaxValue;
+    int _placedW, _placedH;
+
     public void Play(EdgeStyle style)
     {
         if (_hwnd == IntPtr.Zero) new WindowInteropHelper(this).EnsureHandle();
-        // 和通知卡片一致：没打开“允许截图和录屏”时，截图、录屏、共享屏幕里看不到它
-        SetWindowDisplayAffinity(_hwnd, Glass.GlassSurface.AllowCapture ? 0u : 0x11u /*WDA_EXCLUDEFROMCAPTURE*/);
+        // 和通知卡片一致：没打开“允许截图和录屏”时，截图、录屏、共享屏幕里看不到它。只在取值变化时才改。
+        uint affinity = Glass.GlassSurface.AllowCapture ? 0u : 0x11u /*WDA_EXCLUDEFROMCAPTURE*/;
+        if (affinity != _affinity) { SetWindowDisplayAffinity(_hwnd, affinity); _affinity = affinity; }
+
+        // 尽量少动窗口：尺寸只在第一次或屏幕分辨率变了时设置，之后每次只是从屏幕外挪回来。
+        // 窗口的每次显示 / 隐藏 / 改尺寸都会让 WPF 同步重建分层窗口的渲染目标，频繁这样做会触发渲染线程失败。
         var mon = Native.GetPrimaryMonitorRect();
-        if (!IsVisible) Show();
-        Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, mon.Left, mon.Top, mon.Width, mon.Height, Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
+        uint flags = Native.SWP_NOACTIVATE;
+        if (mon.Width == _placedW && mon.Height == _placedH) flags |= Native.SWP_NOSIZE;
+        _placedW = mon.Width; _placedH = mon.Height;
+        Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, mon.Left, mon.Top, mon.Width, mon.Height, flags);
+        if (!IsVisible)
+        {
+            Show();
+            // 第一次显示时 WPF 可能按自己记的尺寸摆窗口，再对齐一次
+            Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, mon.Left, mon.Top, mon.Width, mon.Height, Native.SWP_NOACTIVATE);
+        }
         _canvas.Start(style);
     }
 

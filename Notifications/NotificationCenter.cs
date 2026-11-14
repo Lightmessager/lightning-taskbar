@@ -136,14 +136,24 @@ internal sealed class NotificationCenter : IDisposable
         _anim.Start();
     }
 
-    EdgeEffectWindow _edge;
+    System.Diagnostics.Process _edge;
     DateTime _lastEdge = DateTime.MinValue;
 
-    /// <summary>播放通知边缘特效。force = 菜单里的预览，不受“边缘特效”开关限制。</summary>
+    /// <summary>
+    /// 播放通知边缘特效。force = 菜单里的预览，不受“边缘特效”开关限制。
+    /// 特效在一个短命子进程里播放：整屏的分层透明窗口偶尔会让 WPF 渲染线程失败（UCEERR_RENDERTHREADFAILURE），
+    /// 那会带崩整个进程、系统任务栏也就回不来了；放在子进程里，最坏只是少播一次特效。
+    /// </summary>
     public void PlayEdge(EdgeStyle style, bool force = false)
     {
         if (!force && !WeatherEngine.Instance.Settings.EdgeEffect) return;
-        try { (_edge ??= new EdgeEffectWindow()).Play(style); }
+        try
+        {
+            if (_edge is { HasExited: false }) _edge.Kill();
+            _edge?.Dispose();
+            var args = $"--edge-effect {style}" + (Glass.GlassSurface.AllowCapture ? " --allow-capture" : "");
+            _edge = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, args) { UseShellExecute = false });
+        }
         catch (Exception ex) { App.Log(ex); }
     }
 
@@ -213,7 +223,7 @@ internal sealed class NotificationCenter : IDisposable
         _anim.Stop();
         foreach (var c in _cards) c.Close();
         _cards.Clear();
-        _edge?.Close();
+        try { if (_edge is { HasExited: false }) _edge.Kill(); } catch { }
     }
 
     [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);

@@ -28,6 +28,14 @@ public partial class App : Application
             return;
         }
 
+        // 通知边缘特效在独立的短命子进程里播放（见 NotificationCenter.PlayEdge），播完就退出
+        int ei = Array.IndexOf(e.Args, "--edge-effect");
+        if (ei >= 0 && ei + 1 < e.Args.Length)
+        {
+            RunEdgeEffect(e.Args[ei + 1], e.Args.Contains("--allow-capture"));
+            return;
+        }
+
         int fi = Array.IndexOf(e.Args, "--render-frames");
         if (fi >= 0 && fi + 1 < e.Args.Length)
         {
@@ -98,6 +106,21 @@ public partial class App : Application
         ListenForShowSignal(bar);
         Notifications = new Notifications.NotificationCenter();
         Notifications.Start();
+    }
+
+    void RunEdgeEffect(string styleName, bool allowCapture)
+    {
+        // 子进程里任何错误都只是少播一次特效，直接退出
+        DispatcherUnhandledException += (_, a) => { a.Handled = true; Shutdown(); };
+        if (!Enum.TryParse<EdgeStyle>(styleName, true, out var style)) { Shutdown(); return; }
+        Glass.GlassSurface.AllowCapture = allowCapture;
+        var win = new Notifications.EdgeEffectWindow();
+        win.Finished += Shutdown;
+        // 保险：无论如何 8 秒后退出
+        var guard = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
+        guard.Tick += (_, _) => Shutdown();
+        guard.Start();
+        win.Play(style);
     }
 
     internal bool AppearanceOpen => _appearance?.IsVisible == true;
