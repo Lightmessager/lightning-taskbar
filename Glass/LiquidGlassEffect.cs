@@ -145,6 +145,8 @@ float4 main(float2 uv : TEXCOORD) : COLOR
     {
         get
         {
+            // 软件渲染不执行 ps_3_0 着色器（元素会原样画出一块黑底），这时一律退回系统模糊
+            if (App.SoftwareRendering || !RenderCapability.IsPixelShaderVersionSupported(3, 0)) return false;
             if (_shader != null) return true;
             if (_failed) return false;
             try { _shader = Compile(); return true; }

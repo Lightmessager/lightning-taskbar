@@ -188,6 +188,21 @@
 
             <Border Height="1" Background="#22FFFFFF" Margin="0,12"/>
 
+            <TextBlock Foreground="#B3FFFFFF" FontSize="12" Text="天气" Margin="2,0,0,5"/>
+            <Border CornerRadius="11" Padding="3" Background="#22000000">
+                <UniformGrid x:Name="WeatherPanel" Columns="4">
+                    <RadioButton Style="{StaticResource Segment}" Content="☁ 晴" Tag="Off" GroupName="Weather" Checked="Weather_Changed"/>
+                    <RadioButton Style="{StaticResource Segment}" Content="🌧 雨" Tag="Rain" GroupName="Weather" Checked="Weather_Changed"/>
+                    <RadioButton Style="{StaticResource Segment}" Content="⛈ 雷雨" Tag="Storm" GroupName="Weather" Checked="Weather_Changed"/>
+                    <RadioButton Style="{StaticResource Segment}" Content="🌪 龙卷风" Tag="Tornado" GroupName="Weather" Checked="Weather_Changed"/>
+                    <RadioButton Style="{StaticResource Segment}" Content="🌨 小雪" Tag="LightSnow" GroupName="Weather" Checked="Weather_Changed"/>
+                    <RadioButton Style="{StaticResource Segment}" Content="❄ 中雪" Tag="Snow" GroupName="Weather" Checked="Weather_Changed"/>
+                    <RadioButton Style="{StaticResource Segment}" Content="🌬 暴雪" Tag="Blizzard" GroupName="Weather" Checked="Weather_Changed"/>
+                </UniformGrid>
+            </Border>
+
+            <Border Height="1" Background="#22FFFFFF" Margin="0,12"/>
+
             <Grid>
                 <StackPanel>
                     <TextBlock Style="{StaticResource Label}" Text="右上角玻璃通知"/>
@@ -208,6 +223,15 @@
                         </ControlTemplate>
                     </CheckBox.Template>
                 </CheckBox>
+            </Grid>
+
+            <Grid Margin="0,10,0,10">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Label}" Text="通知时屏幕边缘特效"/>
+                    <TextBlock Foreground="#99FFFFFF" FontSize="11" Margin="0,2,0,0" Text="随天气变化：紫蓝粉流光 / 闪电 / 霜雾 / 落叶"/>
+                </StackPanel>
+                <CheckBox x:Name="EdgeToggle" Template="{Binding Template, ElementName=NotifyToggle}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                          Focusable="False" Cursor="Hand" Click="Edge_Click"/>
             </Grid>
 
             <Grid Margin="0,0,0,12">

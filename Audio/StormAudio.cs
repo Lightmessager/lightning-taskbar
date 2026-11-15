@@ -98,6 +98,11 @@ public sealed unsafe class StormAudio : IDisposable
     readonly WindSynth _wind = new();
     /// <summary>阵风强度 0..1（来自天气引擎）。</summary>
     public volatile float WindTarget;
+    /// <summary>暴雪呼啸 0..1。</summary>
+    public volatile float HowlTarget;
+    /// <summary>龙卷风轰鸣 0..1。</summary>
+    public volatile float RoarTarget;
+    readonly GaleSynth _gale = new();
     float _rain, _gain = 0;
 
     void Fill(short* buf)
@@ -116,6 +121,8 @@ public sealed unsafe class StormAudio : IDisposable
             _synth.Next(_rain * (1 + 0.25f * gust), out float l, out float r);
             _wind.Next(gust, out float wl, out float wr);
             l += wl; r += wr;
+            _gale.Next(HowlTarget, RoarTarget, out float gl, out float gr);
+            l += gl; r += gr;
 
             for (int i = _voices.Count - 1; i >= 0; i--)
             {

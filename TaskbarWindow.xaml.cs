@@ -289,7 +289,10 @@ public partial class TaskbarWindow : Window
 
         var audio = AppInstance.Audio;
         audio.RainTarget = (float)(Weather.Intensity * (Weather.Mode == WeatherMode.Storm ? 1.0 : 0.7));
-        audio.WindTarget = (float)Weather.Gust;
+        // 雪天只有很轻的底风；暴雪、龙卷风底风强，阵风叠在上面
+        audio.WindTarget = (float)Math.Min(1, Weather.BaseWind + Weather.Gust * (Weather.BaseWind > 0 ? 0.6 : 1));
+        audio.HowlTarget = (float)(Weather.Blizzard * (0.75 + 0.25 * Weather.Gust));
+        audio.RoarTarget = (float)Weather.Tornado;
         audio.Muted = !Weather.Settings.Sound;
         audio.MasterVolume = (float)Weather.Settings.Volume;
     }
@@ -334,9 +337,32 @@ public partial class TaskbarWindow : Window
         ApplyTheme();
     }
 
+    /// <summary>
+    /// 调试：debug-weather 文件写天气名（如 Blizzard），debug-edge 文件写边缘特效名（Glow / StormGlow / Frost / Leaves，空 = 按天气），
+    /// debug-notify 弹一条测试通知，debug-crash 让主进程立刻以访问冲突崩溃（测试守护进程的自动恢复）。
+    /// 读完删除。方便在脚本里切天气、触发特效后截图检查。
+    /// </summary>
+    void CheckDebugTriggers()
+    {
+        var dir = System.IO.Path.GetDirectoryName(ReloadFlag);
+        string Take(string name)
+        {
+            var f = System.IO.Path.Combine(dir, name);
+            if (!System.IO.File.Exists(f)) return null;
+            try { var text = System.IO.File.ReadAllText(f).Trim(); System.IO.File.Delete(f); return text; } catch { return null; }
+        }
+        if (Take("debug-weather") is { } w && Enum.TryParse<WeatherMode>(w, true, out var mode)) Weather.SetMode(mode);
+        if (Take("debug-edge") is { } e)
+            AppInstance.Notifications.PlayEdge(Enum.TryParse<EdgeStyle>(e, true, out var style) ? style : Weather.Mode.Edge(), force: true);
+        if (Take("debug-notify") != null) AppInstance.Notifications.ShowTest();
+        // 验证守护进程用：故意让主进程像原生崩溃那样死掉（托管代码拦不住的访问冲突）
+        if (Take("debug-crash") != null) System.Runtime.InteropServices.Marshal.WriteInt32(new IntPtr(0x7FFFFFFE0000), 0);
+    }
+
     void OnSlowTick()
     {
         CheckReloadFlag();
+        CheckDebugTriggers();
         _tracker.Refresh();
         ShellTaskbar.Enforce();
         UpdateClock();
@@ -420,10 +446,11 @@ public partial class TaskbarWindow : Window
 
     void SyncWeatherUi()
     {
-        WeatherGlyph.Text = Weather.Mode switch { WeatherMode.Off => "☁", WeatherMode.Rain => "🌧", _ => "⛈" };
+        WeatherGlyph.Text = Weather.Mode.Glyph();
+        WeatherButton.ToolTip = $"天气：{Weather.Mode.ShortLabel()}（点击选择）";
         SoundGlyph.Text = Weather.Settings.Sound ? "" : "";
         _themeApplied = false;
-        SoundButton.ToolTip = $"雷雨音效：{(Weather.Settings.Sound ? "开" : "关")}  音量 {Weather.Settings.Volume:P0}（滚轮调节）";
+        SoundButton.ToolTip = $"天气音效：{(Weather.Settings.Sound ? "开" : "关")}  音量 {Weather.Settings.Volume:P0}（滚轮调节）";
         ApplyWallpaperTint();
     }
 
@@ -432,9 +459,14 @@ public partial class TaskbarWindow : Window
         MenuOff.IsChecked = Weather.Mode == WeatherMode.Off;
         MenuRain.IsChecked = Weather.Mode == WeatherMode.Rain;
         MenuStorm.IsChecked = Weather.Mode == WeatherMode.Storm;
+        MenuLightSnow.IsChecked = Weather.Mode == WeatherMode.LightSnow;
+        MenuSnow.IsChecked = Weather.Mode == WeatherMode.Snow;
+        MenuBlizzard.IsChecked = Weather.Mode == WeatherMode.Blizzard;
+        MenuTornado.IsChecked = Weather.Mode == WeatherMode.Tornado;
         MenuSound.IsChecked = Weather.Settings.Sound;
         MenuGlass.IsChecked = Weather.Settings.GlassRefraction;
         MenuExplorer.IsChecked = Weather.Settings.ExplorerGlass;
+        MenuSoftware.IsChecked = App.SoftwareRendering;
     }
 
     // ---------------- 交互 ----------------
@@ -574,8 +606,23 @@ public partial class TaskbarWindow : Window
         foreach (var f in PinnableDrops(e)) _tracker.Pin(f);
     }
 
-    void Weather_Click(object sender, RoutedEventArgs e) =>
-        Weather.SetMode(Weather.Mode switch { WeatherMode.Off => WeatherMode.Rain, WeatherMode.Rain => WeatherMode.Storm, _ => WeatherMode.Off });
+    /// <summary>天气按钮：弹出一个只列天气的小菜单（七种天气，循环点击太慢）。</summary>
+    void Weather_Click(object sender, RoutedEventArgs e)
+    {
+        // Dock 主题下按钮在顶部的 Finder 栏里，菜单往下弹；通栏主题在底部，往上弹
+        var menu = new ContextMenu
+        {
+            PlacementTarget = WeatherButton,
+            Placement = IsDock ? System.Windows.Controls.Primitives.PlacementMode.Bottom : System.Windows.Controls.Primitives.PlacementMode.Top,
+        };
+        foreach (var m in WeatherModes.All)
+        {
+            var item = new MenuItem { Header = $"{m.Glyph()}  {m.Label()}", IsCheckable = true, IsChecked = Weather.Mode == m, Tag = m.ToString() };
+            item.Click += MenuMode_Click;
+            menu.Items.Add(item);
+        }
+        menu.IsOpen = true;
+    }
 
     void Sound_Click(object sender, RoutedEventArgs e)
     {
@@ -607,7 +654,22 @@ public partial class TaskbarWindow : Window
         Weather.Settings.Save();
         if (Weather.Settings.ExplorerGlass) ExplorerGlass.Start(); else ExplorerGlass.Stop();
     }
+    /// <summary>渲染方式是进程级的，只能重启后生效；用启动参数明确指定，盖过守护进程临时加的软件渲染。</summary>
+    void MenuSoftware_Click(object sender, RoutedEventArgs e)
+    {
+        bool software = !App.SoftwareRendering;
+        Weather.Settings.SoftwareRendering = software;
+        Weather.Settings.Save();
+        AppInstance.Restart(software ? TaskbarGuard.SoftwareFlag : TaskbarGuard.HardwareFlag);
+    }
+
     void MenuStrike_Click(object sender, RoutedEventArgs e) => Weather.Strike();
+    void MenuTestNotify_Click(object sender, RoutedEventArgs e) => AppInstance.Notifications.ShowTest();
+    void MenuEdge_Click(object sender, RoutedEventArgs e)
+    {
+        var tag = (string)((MenuItem)sender).Tag;
+        AppInstance.Notifications.PlayEdge(string.IsNullOrEmpty(tag) ? Weather.Mode.Edge() : Enum.Parse<EdgeStyle>(tag), force: true);
+    }
     void MenuAppearance_Click(object sender, RoutedEventArgs e) => AppInstance.ShowAppearance();
     void MenuTaskMgr_Click(object sender, RoutedEventArgs e) =>
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("taskmgr.exe") { UseShellExecute = true });

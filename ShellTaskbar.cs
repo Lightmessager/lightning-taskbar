@@ -54,9 +54,10 @@ internal static class ShellTaskbar
             Native.SystemParametersInfo(Native.SPI_SETWORKAREA, 0, ref full, Native.SPIF_SENDCHANGE);
     }
 
-    public static void Restore()
+    /// <param name="force">守护进程用：本进程没有隐藏过任务栏（是已经崩溃的主进程藏的），也照样恢复。</param>
+    public static void Restore(bool force = false)
     {
-        if (!_hidden) return;
+        if (!_hidden && !force) return;
         _hidden = false;
         foreach (var h in TrayWindows()) Native.ShowWindow(h, Native.SW_SHOW);
 
