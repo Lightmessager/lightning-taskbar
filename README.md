@@ -63,6 +63,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -Run
   Set-ItemProperty $k DumpCount 5
   Set-ItemProperty $k DumpFolder "$env:LOCALAPPDATA\LightningTaskbar\dumps" -Type ExpandString
   ```
+- 想把程序装到别的目录（可以带 `&`、emoji）：把目录写进 `%USERPROFILE%\.lightning-taskbar\install-dir.txt`（一行，UTF-8），或者运行 `build.ps1 -InstallDir 目录`。`build.ps1` 仍在干净路径里编译，再把产物复制过去。
 - `tools\soak.ps1` 是浸泡测试脚本：按间隔随机切天气、弹通知、播边缘特效，统计主进程崩溃次数并对照事件日志。
 - 万一守护进程也没了（比如两个进程一起被结束），系统任务栏可能仍处于隐藏状态，运行 `restore-taskbar.ps1`（重启资源管理器）即可恢复。
 - 当前版本只接管主显示器。

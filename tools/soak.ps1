@@ -9,6 +9,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $data = Join-Path $env:APPDATA 'LightningTaskbar'
 $exe  = Join-Path $env:LOCALAPPDATA 'LightningTaskbar\app\LightningTaskbar.exe'
+$installFile = Join-Path $env:USERPROFILE '.lightning-taskbar\install-dir.txt'
+if (Test-Path -LiteralPath $installFile) {
+    $exe = Join-Path (Get-Content -LiteralPath $installFile -Encoding utf8 -TotalCount 1).Trim() 'LightningTaskbar.exe'
+}
 $weathers = 'Off','Rain','Storm','LightSnow','Snow','Blizzard','Tornado'
 $edges    = 'Glow','StormGlow','Frost','Leaves'
 
@@ -28,7 +32,7 @@ try { $startMode = (Get-Content (Join-Path $data 'settings.json') -Raw | Convert
 $began = Get-Date
 $deadline = $began.AddMinutes($Minutes)
 $pid0 = MainPid
-if ($pid0 -eq 0) { Start-Process $exe; Start-Sleep 6; $pid0 = MainPid }
+if ($pid0 -eq 0) { Start-Process -FilePath $exe; Start-Sleep 6; $pid0 = MainPid }
 Say "开始：$Minutes 分钟，间隔 $IntervalSeconds 秒，主进程 PID $pid0"
 $steps = 0; $crashes = 0; $gone = 0
 $rng = [Random]::new()
@@ -53,7 +57,7 @@ while ((Get-Date) -lt $deadline) {
         if ($now -eq 0) {
             $gone++
             Say "第 $steps 步：主进程没了，守护进程也没有把它拉起来，手动重启"
-            Start-Process $exe; Start-Sleep 6; $now = MainPid
+            Start-Process -FilePath $exe; Start-Sleep 6; $now = MainPid
         } else {
             Say "第 $steps 步：主进程崩溃后已被重启（PID $pid0 -> $now）"
         }
