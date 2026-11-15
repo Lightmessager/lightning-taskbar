@@ -480,6 +480,7 @@
                 <MenuItem x:Name="MenuSound" Header="天气音效" IsCheckable="True" Click="MenuSound_Click"/>
                 <MenuItem x:Name="MenuGlass" Header="真玻璃折射（截图 / 录屏时不显示任务栏）" IsCheckable="True" Click="MenuGlass_Click"/>
                 <MenuItem x:Name="MenuExplorer" Header="资源管理器玻璃背景" IsCheckable="True" Click="MenuExplorer_Click"/>
+                <MenuItem x:Name="MenuSoftware" Header="软件渲染（更稳，无玻璃折射；切换后自动重启）" IsCheckable="True" Click="MenuSoftware_Click"/>
                 <MenuItem Header="⚡ 来一道闪电" Click="MenuStrike_Click"/>
                 <MenuItem Header="🔔 试一条通知（含边缘特效）" Click="MenuTestNotify_Click"/>
                 <MenuItem Header="✨ 预览通知边缘特效">

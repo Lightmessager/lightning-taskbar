@@ -62,8 +62,8 @@ public sealed class GlassSurface : FrameworkElement
     readonly GlassDrops _drops = new();
     readonly ImageBrush _sharpBrush = new() { Stretch = Stretch.Fill }, _frostBrush = new() { Stretch = Stretch.Fill };
     IntPtr _hwnd;
-    double _lastFrame = -1, _sinceCapture = 99, _tintAmount = -1;
-    bool _frozen, _attached;
+    double _lastFrame = -1, _sinceCapture = 99, _tintAmount = -1, _sinceFlagCheck = 99;
+    bool _frozen, _attached, _debugFlag, _captureErrorLogged;
 
     static string DebugFlag => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LightningTaskbar", "debug-show-in-capture");
 
@@ -118,10 +118,21 @@ public sealed class GlassSurface : FrameworkElement
             _sinceCapture = 0;
             // 玻璃不显示时没有东西要截，窗口不必躲着截图。
             // 要求允许截图时先截到一帧背景再放开，否则玻璃一直是黑的。
-            bool allow = AllowCapture || File.Exists(DebugFlag);
+            // 调试开关一秒看一次就够，不必每帧都去查磁盘
+            _sinceFlagCheck += 1 / Fps;
+            if (_sinceFlagCheck >= 1) { _sinceFlagCheck = 0; _debugFlag = File.Exists(DebugFlag); }
+            bool allow = AllowCapture || _debugFlag;
             bool frozen = !visible || (allow && _capture.Sharp != null);
             if (frozen != _frozen) { _frozen = frozen; SetCaptureExclusion(!frozen); }
-            if (!_frozen) Capture();
+            if (!_frozen)
+            {
+                // 截图出任何问题都只是玻璃暂时不刷新，不能让异常冒到 Dispatcher 把任务栏带崩
+                try { Capture(); }
+                catch (Exception ex)
+                {
+                    if (!_captureErrorLogged) { _captureErrorLogged = true; App.Log(ex); }
+                }
+            }
         }
 
         if (!visible) return;
@@ -136,8 +147,11 @@ public sealed class GlassSurface : FrameworkElement
         try { origin = PointToScreen(new Point(0, 0)); } catch (InvalidOperationException) { return; }
 
         int m = _capture.Margin;
-        int w = (int)Math.Ceiling(ActualWidth * dpi.DpiScaleX) + m * 2;
-        int h = (int)Math.Ceiling(ActualHeight * dpi.DpiScaleY) + m * 2;
+        double wd = Math.Ceiling(ActualWidth * dpi.DpiScaleX), hd = Math.Ceiling(ActualHeight * dpi.DpiScaleY);
+        // 布局还没稳定（或显示器正在切换）时可能出现 NaN / 巨大的数值，这一帧不截
+        if (!(wd >= 1 && wd <= 16384 && hd >= 1 && hd <= 16384) || !double.IsFinite(origin.X) || !double.IsFinite(origin.Y)) return;
+        if (Math.Abs(origin.X) > 1e6 || Math.Abs(origin.Y) > 1e6) return;
+        int w = (int)wd + m * 2, h = (int)hd + m * 2;
         int x = (int)Math.Round(origin.X) - m, y = (int)Math.Round(origin.Y) - m;
 
         // 整块都在屏幕外（任务栏已滑出）就不截
@@ -164,7 +178,9 @@ public sealed class GlassSurface : FrameworkElement
         var dpi = VisualTreeHelper.GetDpi(this);
         double wpx = ActualWidth * dpi.DpiScaleX, hpx = ActualHeight * dpi.DpiScaleY;
         int m = _capture.Margin;
-        double tw = wpx + m * 2, th = hpx + m * 2;
+        // 纹理比这一帧截取的范围大（按容量分配、只增不减），uv 要按纹理的实际尺寸换算
+        double tw = _capture.TextureWidth, th = _capture.TextureHeight;
+        if (tw <= 0 || th <= 0) { tw = wpx + m * 2; th = hpx + m * 2; }
 
         Glass.Geometry = new Point4D(ActualWidth, ActualHeight, CornerRadius, Bevel);
         Glass.Mapping = new Point4D(wpx / tw, hpx / th, m / tw, m / th);

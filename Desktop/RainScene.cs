@@ -250,7 +250,8 @@ internal sealed class RainScene : FrameworkElement
         var weather = WeatherEngine.Instance;
         double intensity = weather.Intensity;
         double w = RenderSize.Width, h = RenderSize.Height;
-        if (w <= 0) return;
+        // 高度为 0 时 k = 0，下面的速度也是 0，除出来的 NaN 进了几何数据会让 WPF 渲染线程直接崩溃
+        if (!(w > 0 && h > 0) || !double.IsFinite(w) || !double.IsFinite(h)) return;
         double k = h / 1080.0;
 
         _boltT += dt;
@@ -283,7 +284,7 @@ internal sealed class RainScene : FrameworkElement
             int layer = d.Z < 0.5 ? 0 : d.Z < 0.8 ? 1 : 2;
             var c = ctxs[layer];
             c.BeginFigure(new Point(d.X, d.Y), false, false);
-            c.LineTo(new Point(d.X - vx / speed * len, d.Y - len), true, false);
+            c.LineTo(new Point(d.X - wind * len, d.Y - len), true, false);   // vx / speed 就是 wind
         }
         for (int i = 0; i < 3; i++) { ctxs[i].Close(); geos[i].Freeze(); }
 

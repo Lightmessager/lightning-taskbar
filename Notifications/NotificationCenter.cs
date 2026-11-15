@@ -151,7 +151,8 @@ internal sealed class NotificationCenter : IDisposable
         {
             if (_edge is { HasExited: false }) _edge.Kill();
             _edge?.Dispose();
-            var args = $"--edge-effect {style}" + (Glass.GlassSurface.AllowCapture ? " --allow-capture" : "");
+            var args = $"--edge-effect {style}" + (Glass.GlassSurface.AllowCapture ? " --allow-capture" : "")
+                     + (App.SoftwareRendering ? " --software-rendering" : "");
             _edge = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, args) { UseShellExecute = false });
         }
         catch (Exception ex) { App.Log(ex); }

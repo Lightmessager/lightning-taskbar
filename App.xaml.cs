@@ -16,8 +16,32 @@ public partial class App : Application
     AppearanceWindow _appearance;
     StartMenu.WinKeyHook _winHook;
 
+    /// <summary>整个进程是否在用软件渲染（设置项或启动参数决定，启动后不变）。</summary>
+    internal static bool SoftwareRendering { get; private set; }
+
+    static void UseSoftwareRendering()
+    {
+        SoftwareRendering = true;
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        // 守护进程：只等主进程退出（见 TaskbarGuard）。放到后台线程里等，本线程照常跑消息循环
+        if (e.Args.FirstOrDefault() == TaskbarGuard.Flag)
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            new Thread(() =>
+            {
+                TaskbarGuard.Run(e.Args);
+                Dispatcher.BeginInvoke(() => Shutdown());
+            }) { IsBackground = true, Name = "TaskbarGuard" }.Start();
+            return;
+        }
+
+        // 必须在创建任何窗口之前决定；边缘特效子进程也靠这个参数跟主进程保持一致
+        if (e.Args.Contains(TaskbarGuard.SoftwareFlag)) UseSoftwareRendering();
+
         // 开发用：离线渲染雨声并分析，不启动任务栏
         int ri = Array.IndexOf(e.Args, "--render-rain");
         if (ri >= 0 && ri + 1 < e.Args.Length)
@@ -70,7 +94,12 @@ public partial class App : Application
             return;
         }
 
-        _single = new Mutex(true, "LightningTaskbar.SingleInstance", out bool first);
+        // 按“能不能拿到所有权”判断，而不是“互斥体是不是新建的”：
+        // 上一个实例崩溃后，它的守护进程会短暂打开同一个互斥体，这时互斥体已存在但没有主人
+        _single = new Mutex(false, "LightningTaskbar.SingleInstance");
+        bool first;
+        try { first = _single.WaitOne(0); }
+        catch (AbandonedMutexException) { first = true; }
         if (!first)
         {
             // 已经在运行：让那边的任务栏弹出来，否则双击快捷方式看起来像“没反应”
@@ -79,6 +108,9 @@ public partial class App : Application
             return;
         }
 
+        var settings = Settings.Load();
+        if (!SoftwareRendering && settings.SoftwareRendering && !e.Args.Contains(TaskbarGuard.HardwareFlag)) UseSoftwareRendering();
+
         // 任何崩溃都必须把系统任务栏还回去
         AppDomain.CurrentDomain.UnhandledException += (_, args) => { Log(args.ExceptionObject); Cleanup(); };
         DispatcherUnhandledException += (_, args) => { Log(args.Exception); Cleanup(); };
@@ -86,7 +118,10 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        var settings = Settings.Load();
+        // 原生渲染线程崩溃时进程内来不及善后，交给外面的守护进程：恢复系统任务栏、自动重启。
+        // 要赶在隐藏系统任务栏之前就绪。
+        TaskbarGuard.Start(e.Args);
+
         if (WeatherModes.FromArgs(e.Args) is { } argMode) settings.Mode = argMode;
         WeatherEngine.Instance.Start(settings);
         Glass.GlassSurface.AllowCapture = settings.AllowScreenshots;
@@ -106,6 +141,48 @@ public partial class App : Application
         ListenForShowSignal(bar);
         Notifications = new Notifications.NotificationCenter();
         Notifications.Start();
+
+        int rec = Array.IndexOf(e.Args, TaskbarGuard.RecoveredFlag);
+        if (rec >= 0) AnnounceRecovery(rec + 1 < e.Args.Length ? e.Args[rec + 1] : "", e.Args.Contains(TaskbarGuard.SoftwareFlag));
+    }
+
+    /// <summary>被守护进程从崩溃里拉起来之后，过几秒告诉用户一声（否则只会觉得任务栏莫名闪了一下）。</summary>
+    void AnnounceRecovery(string code, bool softwareByArg)
+    {
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            try
+            {
+                Notifications?.Show(new Notifications.NotificationInfo
+                {
+                    AppName = "Lightning Taskbar",
+                    Title = "已从一次崩溃中自动恢复",
+                    Body = (softwareByArg
+                               ? "短时间内连续崩溃，这次改用软件渲染运行（没有真玻璃折射）。"
+                               : "渲染线程异常退出，任务栏已自动重启。")
+                           + $"异常码 {code}，详情见 %AppData%\\LightningTaskbar\\error.log。",
+                });
+            }
+            catch (Exception ex) { Log(ex); }
+        };
+        timer.Start();
+    }
+
+    /// <summary>正常退出后马上重新启动（切换软件 / 硬件渲染要重启才生效）。</summary>
+    internal void Restart(params string[] args)
+    {
+        Cleanup();
+        try { _single?.ReleaseMutex(); } catch { }
+        try
+        {
+            var info = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
+            foreach (var a in args) info.ArgumentList.Add(a);
+            System.Diagnostics.Process.Start(info)?.Dispose();
+        }
+        catch (Exception ex) { Log(ex); }
+        Shutdown();
     }
 
     void RunEdgeEffect(string styleName, bool allowCapture)

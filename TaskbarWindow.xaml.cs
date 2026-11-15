@@ -339,6 +339,7 @@ public partial class TaskbarWindow : Window
 
     /// <summary>
     /// 调试：debug-weather 文件写天气名（如 Blizzard），debug-edge 文件写边缘特效名（Glow / StormGlow / Frost / Leaves，空 = 按天气），
+    /// debug-notify 弹一条测试通知，debug-crash 让主进程立刻以访问冲突崩溃（测试守护进程的自动恢复）。
     /// 读完删除。方便在脚本里切天气、触发特效后截图检查。
     /// </summary>
     void CheckDebugTriggers()
@@ -354,6 +355,8 @@ public partial class TaskbarWindow : Window
         if (Take("debug-edge") is { } e)
             AppInstance.Notifications.PlayEdge(Enum.TryParse<EdgeStyle>(e, true, out var style) ? style : Weather.Mode.Edge(), force: true);
         if (Take("debug-notify") != null) AppInstance.Notifications.ShowTest();
+        // 验证守护进程用：故意让主进程像原生崩溃那样死掉（托管代码拦不住的访问冲突）
+        if (Take("debug-crash") != null) System.Runtime.InteropServices.Marshal.WriteInt32(new IntPtr(0x7FFFFFFE0000), 0);
     }
 
     void OnSlowTick()
@@ -463,6 +466,7 @@ public partial class TaskbarWindow : Window
         MenuSound.IsChecked = Weather.Settings.Sound;
         MenuGlass.IsChecked = Weather.Settings.GlassRefraction;
         MenuExplorer.IsChecked = Weather.Settings.ExplorerGlass;
+        MenuSoftware.IsChecked = App.SoftwareRendering;
     }
 
     // ---------------- 交互 ----------------
@@ -650,6 +654,15 @@ public partial class TaskbarWindow : Window
         Weather.Settings.Save();
         if (Weather.Settings.ExplorerGlass) ExplorerGlass.Start(); else ExplorerGlass.Stop();
     }
+    /// <summary>渲染方式是进程级的，只能重启后生效；用启动参数明确指定，盖过守护进程临时加的软件渲染。</summary>
+    void MenuSoftware_Click(object sender, RoutedEventArgs e)
+    {
+        bool software = !App.SoftwareRendering;
+        Weather.Settings.SoftwareRendering = software;
+        Weather.Settings.Save();
+        AppInstance.Restart(software ? TaskbarGuard.SoftwareFlag : TaskbarGuard.HardwareFlag);
+    }
+
     void MenuStrike_Click(object sender, RoutedEventArgs e) => Weather.Strike();
     void MenuTestNotify_Click(object sender, RoutedEventArgs e) => AppInstance.Notifications.ShowTest();
     void MenuEdge_Click(object sender, RoutedEventArgs e)

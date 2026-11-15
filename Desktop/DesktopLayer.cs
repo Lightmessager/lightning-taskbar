@@ -15,6 +15,7 @@ internal sealed class DesktopLayer : IDisposable
     IntPtr _workerW;
     readonly RainScene _scene = new();
     readonly DispatcherTimer _watchdog = new() { Interval = TimeSpan.FromSeconds(2) };
+    bool _errorLogged;
 
     public RainScene Scene => _scene;
 
@@ -24,8 +25,18 @@ internal sealed class DesktopLayer : IDisposable
         _watchdog.Tick += (_, _) =>
         {
             // Explorer 重启后 WorkerW 会被销毁，需要重新挂载
-            if (_workerW == IntPtr.Zero || !Native.IsWindow(_workerW)) { Destroy(); Create(); }
-            else BringToTop();
+            // WorkerW 被销毁时，挂在它下面的子窗口也已经被系统销毁，HwndSource 随之自动 Dispose
+            try
+            {
+                if (_workerW == IntPtr.Zero || !Native.IsWindow(_workerW) || _source == null || _source.IsDisposed) { Destroy(); Create(); }
+                else BringToTop();
+            }
+            catch (Exception ex)
+            {
+                // 重新挂载失败（Explorer 还没起来等）：下一次 tick 再试，不要让异常带崩任务栏
+                if (!_errorLogged) { _errorLogged = true; App.Log(ex); }
+                try { Destroy(); } catch { }
+            }
         };
         _watchdog.Start();
     }
@@ -58,6 +69,8 @@ internal sealed class DesktopLayer : IDisposable
 
         Native.GetWindowRect(_workerW, out var host);
         var mon = Native.GetPrimaryMonitorRect();
+        // 显示器正在切换 / 断开时可能拿到空矩形，等下一次 tick
+        if (mon.Width <= 0 || mon.Height <= 0) { _workerW = IntPtr.Zero; return; }
 
         // 已有动态壁纸（Wallpaper Engine 等）挂在同一个 WorkerW 里时，雨层改为逐像素透明叠在它上面
         bool liveWallpaper = false;
@@ -84,25 +97,29 @@ internal sealed class DesktopLayer : IDisposable
     /// <summary>动态壁纸可能会重新抬高自己的 Z 序，定期把雨层放回最上面。</summary>
     void BringToTop()
     {
-        if (_source != null)
+        if (_source != null && !_source.IsDisposed)
             Native.SetWindowPos(_source.Handle, IntPtr.Zero /*HWND_TOP*/, 0, 0, 0, 0,
                 Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
     }
 
     public void SetVisible(bool visible)
     {
-        if (_source == null) return;
+        if (_source == null || _source.IsDisposed) return;
         Native.ShowWindow(_source.Handle, visible ? Native.SW_SHOWNA : Native.SW_HIDE);
     }
 
     void Destroy()
     {
         _scene.Stop();
-        if (_source != null)
+        var source = _source;
+        _source = null;
+        _workerW = IntPtr.Zero;
+        // 已经被系统连带销毁的 HwndSource 不能再碰（给 RootVisual 赋值会抛 ObjectDisposedException）
+        if (source != null && !source.IsDisposed)
         {
-            _source.RootVisual = null;
-            _source.Dispose();
-            _source = null;
+            try { source.RootVisual = null; }
+            catch (ObjectDisposedException) { }
+            finally { try { source.Dispose(); } catch (ObjectDisposedException) { } }
         }
     }
 

@@ -53,7 +53,18 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -Run
 
 ## 注意
 
-- 若进程被强制结束，系统任务栏可能仍处于隐藏状态，运行 `restore-taskbar.ps1`（重启资源管理器）即可恢复。
+- **崩溃兜底**：主进程启动时会带起一个守护进程（`LightningTaskbar.exe --taskbar-guard …`，不创建任何窗口）。主进程异常退出（WPF 原生渲染线程 `wpfgfx_cor3.dll` 里的访问冲突、fail-fast、堆损坏在进程内无法捕获）时，守护进程会自动把它重新拉起来，并弹一条通知说明；10 分钟内连崩 3 次改用软件渲染重启，连崩 5 次就不再重启、把系统任务栏还回去。主进程被强制结束（任务管理器、`Stop-Process`）时只恢复系统任务栏，不重启。每次处理都会写进 `%AppData%\LightningTaskbar\error.log`（`[守护]` 开头），崩溃时间和异常码另记在 `crash-history.log`；守护进程每 5 分钟把主进程的句柄 / GDI / USER 对象数和内存记到 `resource.log`，可以看出有没有资源泄漏。
+- **软件渲染开关**（排查渲染线程崩溃用）：右键菜单“软件渲染”，或 settings.json 里的 `SoftwareRendering`，或启动参数 `--software-rendering` / `--hardware-rendering`（参数优先）。软件渲染完全不走显卡和驱动，更稳，但没有真玻璃折射（退回系统模糊），天气层也更吃 CPU。
+- 想抓到崩溃现场，用管理员 PowerShell 开启 WER 本地转储（转储会写到 `%LOCALAPPDATA%\LightningTaskbar\dumps`）：
+  ```powershell
+  $k = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\LightningTaskbar.exe'
+  New-Item $k -Force
+  Set-ItemProperty $k DumpType 2
+  Set-ItemProperty $k DumpCount 5
+  Set-ItemProperty $k DumpFolder "$env:LOCALAPPDATA\LightningTaskbar\dumps" -Type ExpandString
+  ```
+- `tools\soak.ps1` 是浸泡测试脚本：按间隔随机切天气、弹通知、播边缘特效，统计主进程崩溃次数并对照事件日志。
+- 万一守护进程也没了（比如两个进程一起被结束），系统任务栏可能仍处于隐藏状态，运行 `restore-taskbar.ps1`（重启资源管理器）即可恢复。
 - 当前版本只接管主显示器。
 - 托盘基于 [ManagedShell](https://github.com/cairoshell/ManagedShell)（MIT），它会在本进程注册一个 `Shell_TrayWnd` 接收托盘消息，并同时转发给 Explorer。
 - 桌面雨层按"填充"方式绘制壁纸，如壁纸使用"适应/平铺"可能有轻微差异。

@@ -123,6 +123,11 @@ public sealed class Settings
     /// <summary>真玻璃折射。需要让任务栏不参与屏幕捕获，关闭则退回系统模糊。</summary>
     public bool GlassRefraction { get; set; } = true;
     /// <summary>
+    /// 整个进程只用 CPU 渲染（不走显卡 / 驱动）。排查 wpfgfx 渲染线程崩溃用：更稳，但没有真玻璃折射，天气层更吃 CPU。
+    /// 改动后要重启才生效；启动参数 --software-rendering / --hardware-rendering 可以临时覆盖。
+    /// </summary>
+    public bool SoftwareRendering { get; set; }
+    /// <summary>
     /// 资源管理器窗口使用亚克力 + 深色背景。不注入 Explorer 只能改到标题栏一层，
     /// 系统为浅色主题时与白色内容区反差大，所以默认关闭。
     /// </summary>

@@ -19,8 +19,12 @@ if (Test-Path $oldLink) {
 robocopy $PSScriptRoot $src /MIR /XD bin obj .vs /XF *.user /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "复制源码失败（robocopy $LASTEXITCODE）" }
 
+# 先结束守护进程（--taskbar-guard），再结束主进程。主进程被强制结束时守护进程本来也只恢复系统任务栏、不会重启，
+# 但它不退出的话会占着 exe，编译产物写不进去。
+$all = @(Get-CimInstance Win32_Process -Filter "Name='LightningTaskbar.exe'" -ErrorAction SilentlyContinue)
+$all | Where-Object { $_.CommandLine -match '--taskbar-guard' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Get-Process LightningTaskbar -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 300
+Start-Sleep -Milliseconds 500
 
 Push-Location $src
 try {
