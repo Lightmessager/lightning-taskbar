@@ -56,7 +56,8 @@ public partial class App : Application
         int ei = Array.IndexOf(e.Args, "--edge-effect");
         if (ei >= 0 && ei + 1 < e.Args.Length)
         {
-            RunEdgeEffect(e.Args[ei + 1], e.Args.Contains("--allow-capture"));
+            int ti = Array.IndexOf(e.Args, "--edge-tint");
+            RunEdgeEffect(e.Args[ei + 1], ti >= 0 && ti + 1 < e.Args.Length ? e.Args[ti + 1] : null, e.Args.Contains("--allow-capture"));
             return;
         }
 
@@ -185,7 +186,7 @@ public partial class App : Application
         Shutdown();
     }
 
-    void RunEdgeEffect(string styleName, bool allowCapture)
+    void RunEdgeEffect(string styleName, string tintName, bool allowCapture)
     {
         // 子进程里任何错误都只是少播一次特效，直接退出
         DispatcherUnhandledException += (_, a) => { a.Handled = true; Shutdown(); };
@@ -197,7 +198,7 @@ public partial class App : Application
         var guard = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
         guard.Tick += (_, _) => Shutdown();
         guard.Start();
-        win.Play(style);
+        win.Play(style, Enum.TryParse<EdgeTint>(tintName, true, out var tint) ? tint : EdgeTint.Default);
     }
 
     internal bool AppearanceOpen => _appearance?.IsVisible == true;

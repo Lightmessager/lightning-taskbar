@@ -14,7 +14,6 @@
     <Grid>
         <glass:GlassSurface x:Name="GlassBg" CornerRadius="14" Bevel="8" ShadowPad="12"/>
         <!-- 几乎不可见的一层：保证空白处能接收鼠标；状态图标由任务栏窗口搬到 Host 里 -->
-        <Border x:Name="Host" Margin="12" Padding="6,3" Background="#02000000" MinHeight="38"
-                MouseRightButtonUp="Host_MouseRightButtonUp"/>
+        <Border x:Name="Host" Margin="12" Padding="6,3" Background="#02000000" MinHeight="38"/>
     </Grid>
 </Window>

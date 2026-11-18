@@ -160,7 +160,7 @@
         <Style x:Key="TaskButtonStyle" TargetType="Button" BasedOn="{StaticResource TaskGlassStyle}"/>
     </Window.Resources>
 
-    <Grid x:Name="Root" ClipToBounds="True" AllowDrop="True" Drop="Root_Drop" DragOver="Root_DragOver">
+    <Grid x:Name="Root" ClipToBounds="True" AllowDrop="True" Drop="Root_Drop" DragOver="Root_DragOver" ContextMenuOpening="Root_ContextMenuOpening">
         <!-- ===== 玻璃 ===== -->
         <!-- 实时截取背后画面 → 磨砂 / 倒角折射 / 边缘高光 / 投影 / 透镜雨珠，全部在一个着色器里完成 -->
         <glass:GlassSurface x:Name="GlassBg" CornerRadius="22" Bevel="16" ShadowPad="12"/>
@@ -453,7 +453,11 @@
                     <TextBlock x:Name="SoundGlyph" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Text="&#xE767;" Foreground="{DynamicResource Fg}"/>
                 </Button>
                 <Button x:Name="QuickButton" Style="{StaticResource GlassButton}" Width="46" Height="46" Click="QuickSettings_Click" ToolTip="网络 / 音量 / 快速设置">
-                    <TextBlock x:Name="QuickGlyph" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Text="&#xE713;" Foreground="{DynamicResource Fg}"/>
+                    <TextBlock x:Name="QuickGlyph" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Text="&#xE701;" Foreground="{DynamicResource Fg}"/>
+                </Button>
+                <!-- Lightning Taskbar 自己的设置：只从这个齿轮打开，空白处右键不再弹菜单，免得右击托盘图标时误触 -->
+                <Button x:Name="SettingsButton" Style="{StaticResource GlassButton}" Width="46" Height="46" Click="Settings_Click" ToolTip="Lightning Taskbar 设置">
+                    <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Text="&#xE713;" Foreground="{DynamicResource Fg}"/>
                 </Button>
                 <Button x:Name="ClockButton" Style="{StaticResource GlassButton}" Height="52" Padding="12,0" Click="Clock_Click" ToolTip="通知与日历">
                     <StackPanel x:Name="ClockPanel" Margin="12,0" VerticalAlignment="Center">
@@ -485,6 +489,9 @@
                 <MenuItem Header="🔔 试一条通知（含边缘特效）" Click="MenuTestNotify_Click"/>
                 <MenuItem Header="✨ 预览通知边缘特效">
                     <MenuItem Header="按当前天气" Click="MenuEdge_Click" Tag=""/>
+                    <MenuItem Header="按当前天气 · Claude 橙" Click="MenuEdge_Click" Tag=":Claude"/>
+                    <MenuItem Header="按当前天气 · ChatGPT 紫" Click="MenuEdge_Click" Tag=":Gpt"/>
+                    <MenuItem Header="按当前天气 · 微信蓝绿" Click="MenuEdge_Click" Tag=":WeChat"/>
                     <Separator/>
                     <MenuItem Header="紫蓝粉流光（晴 / 雨）" Click="MenuEdge_Click" Tag="Glow"/>
                     <MenuItem Header="流光 + 闪电（雷雨）" Click="MenuEdge_Click" Tag="StormGlow"/>

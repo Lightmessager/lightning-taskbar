@@ -41,6 +41,23 @@ internal static class FrameRender
             for (int i = 0; i < 40 * 30; i++) engine.Tick(dt);
         }
 
+        // 按应用配色：每种配色在晴天流光和下雪霜雾里各拍一张
+        foreach (var tint in new[] { EdgeTint.Claude, EdgeTint.Gpt, EdgeTint.WeChat })
+            foreach (var (style, at) in new[] { (EdgeStyle.Glow, 1.0), (EdgeStyle.Frost, 1.6) })
+            {
+                var canvas = new EdgeCanvas();
+                var root = new Grid
+                {
+                    Background = new LinearGradientBrush(Color.FromRgb(40, 52, 74), Color.FromRgb(16, 20, 30), 90),
+                    Children = { canvas },
+                };
+                root.Measure(new Size(W, H));
+                root.Arrange(new Rect(0, 0, W, H));
+                canvas.Start(style, tint);
+                for (double t = 0; t < at; t += 1 / 60.0) canvas.Advance(1 / 60.0);
+                Save(root, Path.Combine(dir, $"edge-{style}-{tint}.png"));
+            }
+
         foreach (var style in Enum.GetValues<EdgeStyle>())
         {
             var canvas = new EdgeCanvas();

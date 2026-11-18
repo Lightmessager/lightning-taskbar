@@ -352,8 +352,7 @@ public partial class TaskbarWindow : Window
             try { var text = System.IO.File.ReadAllText(f).Trim(); System.IO.File.Delete(f); return text; } catch { return null; }
         }
         if (Take("debug-weather") is { } w && Enum.TryParse<WeatherMode>(w, true, out var mode)) Weather.SetMode(mode);
-        if (Take("debug-edge") is { } e)
-            AppInstance.Notifications.PlayEdge(Enum.TryParse<EdgeStyle>(e, true, out var style) ? style : Weather.Mode.Edge(), force: true);
+        if (Take("debug-edge") is { } e) PlayEdgePreview(e);
         if (Take("debug-notify") != null) AppInstance.Notifications.ShowTest();
         // 验证守护进程用：故意让主进程像原生崩溃那样死掉（托管代码拦不住的访问冲突）
         if (Take("debug-crash") != null) System.Runtime.InteropServices.Marshal.WriteInt32(new IntPtr(0x7FFFFFFE0000), 0);
@@ -665,10 +664,15 @@ public partial class TaskbarWindow : Window
 
     void MenuStrike_Click(object sender, RoutedEventArgs e) => Weather.Strike();
     void MenuTestNotify_Click(object sender, RoutedEventArgs e) => AppInstance.Notifications.ShowTest();
-    void MenuEdge_Click(object sender, RoutedEventArgs e)
+    void MenuEdge_Click(object sender, RoutedEventArgs e) => PlayEdgePreview((string)((MenuItem)sender).Tag);
+
+    /// <summary>预览边缘特效。spec 形如 "Frost"、"Glow:Claude" 或 ":Gpt"；样式省略时按当前天气，配色省略时用默认。</summary>
+    void PlayEdgePreview(string spec)
     {
-        var tag = (string)((MenuItem)sender).Tag;
-        AppInstance.Notifications.PlayEdge(string.IsNullOrEmpty(tag) ? Weather.Mode.Edge() : Enum.Parse<EdgeStyle>(tag), force: true);
+        var parts = (spec ?? "").Split(':');
+        var style = Enum.TryParse<EdgeStyle>(parts[0], true, out var s) ? s : Weather.Mode.Edge();
+        var tint = parts.Length > 1 && Enum.TryParse<EdgeTint>(parts[1], true, out var t) ? t : EdgeTint.Default;
+        AppInstance.Notifications.PlayEdge(style, tint, force: true);
     }
     void MenuAppearance_Click(object sender, RoutedEventArgs e) => AppInstance.ShowAppearance();
     void MenuTaskMgr_Click(object sender, RoutedEventArgs e) =>

@@ -49,7 +49,7 @@ internal sealed class EdgeEffectWindow : Window
     uint _affinity = uint.MaxValue;
     int _placedW, _placedH;
 
-    public void Play(EdgeStyle style)
+    public void Play(EdgeStyle style, EdgeTint tint = EdgeTint.Default)
     {
         if (_hwnd == IntPtr.Zero) new WindowInteropHelper(this).EnsureHandle();
         // 和通知卡片一致：没打开“允许截图和录屏”时，截图、录屏、共享屏幕里看不到它。只在取值变化时才改。
@@ -69,7 +69,7 @@ internal sealed class EdgeEffectWindow : Window
             // 第一次显示时 WPF 可能按自己记的尺寸摆窗口，再对齐一次
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, mon.Left, mon.Top, mon.Width, mon.Height, Native.SWP_NOACTIVATE);
         }
-        _canvas.Start(style);
+        _canvas.Start(style, tint);
     }
 
     void Park()
@@ -94,6 +94,7 @@ internal sealed class EdgeCanvas : FrameworkElement
     readonly Random _rng = new();
 
     EdgeStyle _style;
+    EdgeTint _tint;
     double _t, _last = -1, _duration;
     bool _running;
     int _seed;
@@ -111,9 +112,10 @@ internal sealed class EdgeCanvas : FrameworkElement
     protected override int VisualChildrenCount => _children.Count;
     protected override Visual GetVisualChild(int index) => _children[index];
 
-    public void Start(EdgeStyle style)
+    public void Start(EdgeStyle style, EdgeTint tint = EdgeTint.Default)
     {
         _style = style;
+        _tint = tint;
         _t = 0;
         _last = -1;
         _seed = _rng.Next();
@@ -190,7 +192,8 @@ internal sealed class EdgeCanvas : FrameworkElement
     // ---------------- 晴 / 雨 / 雷雨：流动的紫蓝粉光 ----------------
 
     const int Hues = 72, Levels = 16, GlowLayers = 3;
-    static readonly Pen[,,] GlowPens = new Pen[2, GlowLayers, Hues * Levels];
+    const int PaletteCount = 5;
+    static readonly Pen[,,] GlowPens = new Pen[PaletteCount, GlowLayers, Hues * Levels];
     double _glowK;
 
     // 紫 → 蓝 → 浅蓝 → 粉 → 品红 → 紫（雷雨版更偏蓝紫）
@@ -205,6 +208,20 @@ internal sealed class EdgeCanvas : FrameworkElement
         Color.FromRgb(200, 120, 255), Color.FromRgb(240, 120, 220), Color.FromRgb(120, 100, 255),
     };
 
+    // 按应用配色：微信蓝绿、Claude 橙、ChatGPT / Codex 紫
+    static readonly Color[][] Palettes =
+    {
+        Palette, StormPalette,
+        new[] { Rgb(0x07C160), Rgb(0x00D2B4), Rgb(0x1AA3FF), Rgb(0x07C160) },
+        new[] { Rgb(0xFF9A4D), Rgb(0xD97757), Rgb(0xFFC078), Rgb(0xFF7A3D), Rgb(0xFF9A4D) },
+        new[] { Rgb(0x8B5CF6), Rgb(0xC084FC), Rgb(0x6D28D9), Rgb(0xE879F9), Rgb(0x8B5CF6) },
+    };
+
+    static Color Rgb(int v) => Color.FromRgb((byte)(v >> 16), (byte)(v >> 8), (byte)v);
+
+    /// <summary>光带用哪套颜色：认出的应用用它自己的颜色（雷雨天照样闪电），其余按天气。</summary>
+    int PaletteIndex(bool storm) => _tint == EdgeTint.Default ? (storm ? 1 : 0) : 1 + (int)_tint;
+
     static Color PaletteAt(Color[] pal, double u)
     {
         u = (u - Math.Floor(u)) * (pal.Length - 1);
@@ -214,13 +231,12 @@ internal sealed class EdgeCanvas : FrameworkElement
         return Color.FromRgb((byte)(a.R + (b.R - a.R) * f), (byte)(a.G + (b.G - a.G) * f), (byte)(a.B + (b.B - a.B) * f));
     }
 
-    Pen GlowPen(bool storm, int layer, int hue, int level, double k)
+    Pen GlowPen(int pi, int layer, int hue, int level, double k)
     {
         if (Math.Abs(k - _glowK) > 0.001) { Array.Clear(GlowPens); _glowK = k; }
-        int pi = storm ? 1 : 0;
         ref var pen = ref GlowPens[pi, layer, hue * Levels + level];
         if (pen != null) return pen;
-        var c = PaletteAt(storm ? StormPalette : Palette, (double)hue / Hues);
+        var c = PaletteAt(Palettes[pi], (double)hue / Hues);
         double[] width = { 110, 40, 4.5 };
         double[] alpha = { 0.55, 0.8, 0.95 };
         double a = alpha[layer] * (0.35 + 0.65 * level / (Levels - 1.0));
@@ -242,14 +258,14 @@ internal sealed class EdgeCanvas : FrameworkElement
         _ => new Rect(0, Math.Min(a.Y, b.Y), depth, Math.Abs(b.Y - a.Y)),
     };
 
-    static readonly Brush[,,] GlowBrushes = new Brush[2, 4, Hues * Levels];
+    static readonly Brush[,,] GlowBrushes = new Brush[PaletteCount, 4, Hues * Levels];
 
     /// <summary>一段光带的画刷：边上是颜色，向内按近似高斯的曲线淡到透明。</summary>
-    static Brush GlowBrush(bool storm, int side, int hue, int level)
+    static Brush GlowBrush(int pi, int side, int hue, int level)
     {
-        ref var brush = ref GlowBrushes[storm ? 1 : 0, side, hue * Levels + level];
+        ref var brush = ref GlowBrushes[pi, side, hue * Levels + level];
         if (brush != null) return brush;
-        var c = PaletteAt(storm ? StormPalette : Palette, (double)hue / Hues);
+        var c = PaletteAt(Palettes[pi], (double)hue / Hues);
         double a = 0.62 * (0.35 + 0.65 * level / (Levels - 1.0));
         Color A(double f) => Color.FromArgb((byte)(a * f * 255), c.R, c.G, c.B);
         var stops = new GradientStopCollection { new(A(1), 0), new(A(0.62), 0.22), new(A(0.28), 0.48), new(A(0.08), 0.75), new(A(0), 1) };
@@ -284,6 +300,7 @@ internal sealed class EdgeCanvas : FrameworkElement
         double env = Smooth(0, 0.4, _t) * (1 - Smooth(_duration - 0.9, _duration, _t));
         const int N = 220;
         double flow = _t * 0.22;
+        int pi = PaletteIndex(storm);
 
         using (var dc = _soft.RenderOpen())
         using (var sc = _sharp.RenderOpen())
@@ -299,9 +316,9 @@ internal sealed class EdgeCanvas : FrameworkElement
                 int level = Math.Clamp((int)(wave * (Levels - 1) + 0.5), 0, Levels - 1);
                 // 从边上向内渐隐的两层光带：宽而淡的一层 + 窄而亮的一层
                 int side = SideOf(n);
-                dc.DrawRectangle(GlowBrush(storm, side, hue, level), null, Band(a, b, side, 120 * k, w, h));
-                dc.DrawRectangle(GlowBrush(storm, side, hue, Math.Min(Levels - 1, level + 1)), null, Band(a, b, side, 38 * k, w, h));
-                sc.DrawLine(GlowPen(storm, 2, hue, Math.Min(Levels - 1, level + 2), k), a, b);
+                dc.DrawRectangle(GlowBrush(pi, side, hue, level), null, Band(a, b, side, 120 * k, w, h));
+                dc.DrawRectangle(GlowBrush(pi, side, hue, Math.Min(Levels - 1, level + 1)), null, Band(a, b, side, 38 * k, w, h));
+                sc.DrawLine(GlowPen(pi, 2, hue, Math.Min(Levels - 1, level + 2), k), a, b);
             }
 
             if (storm) DrawStormFlashes(dc, sc, w, h, k);
@@ -377,20 +394,26 @@ internal sealed class EdgeCanvas : FrameworkElement
     const double FrostGrow = 1.2, MeltStart = 2.0;
     double[] _frostPhase;
     (double s, double size)[] _frostBlooms;
-    static readonly Brush FrostBloom = MakeFrostBloom();
+    // 霜雾的颜色：普通应用是白色；微信、Claude、ChatGPT 仍用各自的颜色，只是同样淡淡的
+    static readonly Color[] FrostColors = { Color.FromRgb(232, 242, 255), Rgb(0x3FD8A0), Rgb(0xFFA060), Rgb(0xB48CFF) };
+    static readonly Brush[] FrostBlooms = new Brush[FrostColors.Length];
 
-    static Brush MakeFrostBloom()
+    static Brush FrostBloom(EdgeTint tint)
     {
-        var b = new RadialGradientBrush(Color.FromArgb(70, 236, 244, 255), Color.FromArgb(0, 236, 244, 255));
+        ref var b = ref FrostBlooms[(int)tint];
+        if (b != null) return b;
+        var c = FrostColors[(int)tint];
+        b = new RadialGradientBrush(Color.FromArgb(70, c.R, c.G, c.B), Color.FromArgb(0, c.R, c.G, c.B));
         b.Freeze();
         return b;
     }
-    static readonly Brush[] FrostBrushes = new Brush[4];
+    static readonly Brush[,] FrostBrushes = new Brush[FrostColors.Length, 4];
 
-    static Brush FrostBrush(int side)
+    static Brush FrostBrush(EdgeTint tint, int side)
     {
-        if (FrostBrushes[side] != null) return FrostBrushes[side];
-        Color A(double f) => Color.FromArgb((byte)(f * 255), 232, 242, 255);
+        if (FrostBrushes[(int)tint, side] != null) return FrostBrushes[(int)tint, side];
+        var c = FrostColors[(int)tint];
+        Color A(double f) => Color.FromArgb((byte)(f * 255), c.R, c.G, c.B);
         var stops = new GradientStopCollection { new(A(0.42), 0), new(A(0.26), 0.25), new(A(0.1), 0.55), new(A(0.025), 0.8), new(A(0), 1) };
         var (sp, ep) = side switch
         {
@@ -401,7 +424,7 @@ internal sealed class EdgeCanvas : FrameworkElement
         };
         var brush = new LinearGradientBrush(stops, sp, ep);
         brush.Freeze();
-        return FrostBrushes[side] = brush;
+        return FrostBrushes[(int)tint, side] = brush;
     }
 
     void DrawFrost(double w, double h, double k)
@@ -427,17 +450,17 @@ internal sealed class EdgeCanvas : FrameworkElement
             if (depth > 1)
             {
                 // 四条完整的渐变带（没有拼接缝），四角自然叠得更厚
-                dc.DrawRectangle(FrostBrush(0), null, new Rect(0, 0, w, depth));
-                dc.DrawRectangle(FrostBrush(2), null, new Rect(0, h - depth, w, depth));
-                dc.DrawRectangle(FrostBrush(3), null, new Rect(0, 0, depth, h));
-                dc.DrawRectangle(FrostBrush(1), null, new Rect(w - depth, 0, depth, h));
+                dc.DrawRectangle(FrostBrush(_tint, 0), null, new Rect(0, 0, w, depth));
+                dc.DrawRectangle(FrostBrush(_tint, 2), null, new Rect(0, h - depth, w, depth));
+                dc.DrawRectangle(FrostBrush(_tint, 3), null, new Rect(0, 0, depth, h));
+                dc.DrawRectangle(FrostBrush(_tint, 1), null, new Rect(w - depth, 0, depth, h));
                 // 几团大而柔的霜晕贴在边上，让霜的厚薄有起伏
                 for (int i = 0; i < _frostBlooms.Length; i++)
                 {
                     var (s0, size) = _frostBlooms[i];
                     var (p, _) = Perimeter(s0 + Math.Sin(_t * 0.3 + i) * 0.003, w, h);
                     double r = size * k * (depth / (150 * k));
-                    dc.DrawEllipse(FrostBloom, null, p, r * 1.6, r);
+                    dc.DrawEllipse(FrostBloom(_tint), null, p, r * 1.6, r);
                 }
             }
         }

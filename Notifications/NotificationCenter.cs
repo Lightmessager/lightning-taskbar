@@ -122,7 +122,7 @@ internal sealed class NotificationCenter : IDisposable
         if (DateTime.Now - _lastEdge > TimeSpan.FromSeconds(2.5))
         {
             _lastEdge = DateTime.Now;
-            PlayEdge(WeatherEngine.Instance.Mode.Edge());
+            PlayEdge(WeatherEngine.Instance.Mode.Edge(), EdgeTints.FromApp(info.AppName, info.AppId));
         }
 
         var card = new NotificationCard(info);
@@ -144,14 +144,14 @@ internal sealed class NotificationCenter : IDisposable
     /// 特效在一个短命子进程里播放：整屏的分层透明窗口偶尔会让 WPF 渲染线程失败（UCEERR_RENDERTHREADFAILURE），
     /// 那会带崩整个进程、系统任务栏也就回不来了；放在子进程里，最坏只是少播一次特效。
     /// </summary>
-    public void PlayEdge(EdgeStyle style, bool force = false)
+    public void PlayEdge(EdgeStyle style, EdgeTint tint = EdgeTint.Default, bool force = false)
     {
         if (!force && !WeatherEngine.Instance.Settings.EdgeEffect) return;
         try
         {
             if (_edge is { HasExited: false }) _edge.Kill();
             _edge?.Dispose();
-            var args = $"--edge-effect {style}" + (Glass.GlassSurface.AllowCapture ? " --allow-capture" : "")
+            var args = $"--edge-effect {style} --edge-tint {tint}" + (Glass.GlassSurface.AllowCapture ? " --allow-capture" : "")
                      + (App.SoftwareRendering ? " --software-rendering" : "");
             _edge = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, args) { UseShellExecute = false });
         }

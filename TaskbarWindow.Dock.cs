@@ -284,11 +284,26 @@ public partial class TaskbarWindow
         _finder.Step(want);
     }
 
-    /// <summary>Finder 栏空白处右键：和任务栏共用一个菜单。</summary>
-    internal void OpenBarMenu(UIElement target)
+    /// <summary>齿轮按钮：打开设置菜单。Dock 主题下按钮在顶部的 Finder 栏里，菜单往下弹；通栏主题在底部，往上弹。</summary>
+    void Settings_Click(object sender, RoutedEventArgs e)
     {
-        BarMenu.PlacementTarget = target;
+        BarMenu.PlacementTarget = SettingsButton;
+        BarMenu.Placement = IsDock ? System.Windows.Controls.Primitives.PlacementMode.Bottom : System.Windows.Controls.Primitives.PlacementMode.Top;
         BarMenu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// 空白处右键不再弹设置菜单（只从齿轮打开）。应用图标等自带右键菜单的控件不受影响：
+    /// 只有沿路没有别的菜单、要弹的是整条栏的菜单时才拦下。
+    /// </summary>
+    void Root_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        for (var d = e.OriginalSource as DependencyObject; d != null && d != Root; d = Parent(d))
+            if (d is FrameworkElement { ContextMenu: not null }) return;
+        e.Handled = true;
+
+        static DependencyObject Parent(DependencyObject d) =>
+            d is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d);
     }
 
     // ---------------- 几何 ----------------

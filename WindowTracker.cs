@@ -461,13 +461,54 @@ internal sealed class WindowTracker
         return -1;
     }
 
+    /// <summary>
+    /// 把窗口切到最前并激活。只调 SetForegroundWindow 不够可靠：前台锁会让它只闪烁任务栏按钮，
+    /// 或者窗口拿到了焦点、叠放顺序却没变，看上去还压在别的窗口下面。所以这里：
+    /// 1. 有模态对话框等弹出窗口时激活它（和系统任务栏一样），否则点了主窗口也会被对话框挡回去；
+    /// 2. 最小化的先同步还原（窗口没响应时才用异步，免得卡住任务栏）；
+    /// 3. 临时把输入队列挂到当前前台窗口的线程上，再 BringWindowToTop + SetForegroundWindow；
+    /// 4. 还是没到前台就用 SwitchToThisWindow 兜底，稍后再检查一次叠放顺序。
+    /// </summary>
     public static void Focus(IntPtr h)
     {
-        if (Native.IsIconic(h)) Native.ShowWindowAsync(h, Native.SW_RESTORE);
-        // 用 Alt 键绕过前台锁，否则 SetForegroundWindow 常常只闪烁
-        Native.keybd_event(0x12, 0, 0, UIntPtr.Zero);
-        Native.SetForegroundWindow(h);
-        Native.keybd_event(0x12, 0, 2, UIntPtr.Zero);
+        var popup = Native.GetLastActivePopup(h);
+        if (popup != IntPtr.Zero && popup != h && Native.IsWindowVisible(popup) && !Native.IsIconic(h)) h = popup;
+
+        bool hung = Native.IsHungAppWindow(h);
+        if (Native.IsIconic(h))
+        {
+            if (hung) Native.ShowWindowAsync(h, Native.SW_RESTORE);
+            else Native.ShowWindow(h, Native.SW_RESTORE);
+        }
+
+        var fg = Native.GetForegroundWindow();
+        uint me = Native.GetCurrentThreadId();
+        uint fgThread = fg == IntPtr.Zero ? 0 : Native.GetWindowThreadProcessId(fg, out _);
+        bool attached = fgThread != 0 && fgThread != me && !hung && Native.AttachThreadInput(me, fgThread, true);
+        try
+        {
+            // 用 Alt 键绕过前台锁（挂输入队列失败时它是主要手段）
+            Native.keybd_event(0x12, 0, 0, UIntPtr.Zero);
+            Native.BringWindowToTop(h);
+            Native.SetForegroundWindow(h);
+            Native.keybd_event(0x12, 0, 2, UIntPtr.Zero);
+        }
+        finally
+        {
+            if (attached) Native.AttachThreadInput(me, fgThread, false);
+        }
+        if (Native.GetForegroundWindow() != h) Native.SwitchToThisWindow(h, true);
+
+        // 有的窗口（还原动画中、或者异步还原的）此刻还没真正到前台，过一会儿再确认一次
+        var check = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
+        check.Tick += (_, _) =>
+        {
+            check.Stop();
+            var now = Native.GetForegroundWindow();
+            if (now == h || Native.GetAncestor(now, 3 /*GA_ROOTOWNER*/) == Native.GetAncestor(h, 3)) return;
+            Native.SwitchToThisWindow(h, true);
+        };
+        check.Start();
     }
 
     /// <summary>打开该应用的新实例（固定项优先用快捷方式，保留启动参数）。</summary>

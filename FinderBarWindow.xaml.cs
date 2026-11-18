@@ -117,10 +117,4 @@ public partial class FinderBarWindow : Window
         Resources["Fg"] = new SolidColorBrush(light ? Color.FromRgb(16, 20, 28) : Colors.White);
         Resources["FgDim"] = new SolidColorBrush(light ? Color.FromArgb(0xB0, 16, 20, 28) : Color.FromArgb(0xB3, 255, 255, 255));
     }
-
-    void Host_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        e.Handled = true;
-        _bar.OpenBarMenu(Host);
-    }
 }

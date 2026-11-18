@@ -7,7 +7,7 @@ namespace LightningTaskbar.Desktop;
 /// 桌面雪景。刻意做得稀疏、柔和（满屏均匀的小硬点会让人不适）：
 /// 近处只有少量大的六角雪花，半透明、边缘带柔光、慢慢翻转着飘；
 /// 中景是柔边的绒雪；远处是极淡的细雪。暴雪不拉斜线，而是靠白茫茫的雪幕和随风掠过的雪雾表现。
-/// 底部会慢慢堆起积雪，停雪后慢慢化掉。
+/// 不画地面积雪。
 /// </summary>
 internal sealed class SnowLayer
 {
@@ -26,22 +26,14 @@ internal sealed class SnowLayer
     readonly Random _rng = new(4242);
     readonly Flake[] _flakes = new Flake[MaxFlakes];
     int _active;
-    double _time, _accum;
+    double _time;
     bool _seeded;
 
-    // 积雪的起伏轮廓
-    readonly double[] _driftFreq = new double[5], _driftPhase = new double[5], _driftAmp = new double[5];
 
     // 雪雾团：几团大的柔光椭圆随风飘过
     struct Haze { public double X, Y, R, Speed; }
     readonly Haze[] _haze = new Haze[7];
 
-    static readonly Brush SnowBank = Frozen(new LinearGradientBrush(new GradientStopCollection
-    {
-        new(Color.FromArgb(235, 248, 250, 255), 0),
-        new(Color.FromArgb(225, 226, 234, 246), 0.35),
-        new(Color.FromArgb(215, 196, 210, 230), 1),
-    }, 90));
     static readonly Brush HazeBrush = Frozen(new RadialGradientBrush(Color.FromArgb(140, 236, 242, 250), Color.FromArgb(0, 236, 242, 250)));
     static readonly Brush GroundMist = Frozen(new LinearGradientBrush(
         new GradientStopCollection { new(Color.FromArgb(0, 230, 236, 245), 0), new(Color.FromArgb(150, 230, 236, 245), 1) }, 90));
@@ -105,16 +97,6 @@ internal sealed class SnowLayer
         return g;
     }
 
-    public SnowLayer()
-    {
-        for (int i = 0; i < 5; i++)
-        {
-            _driftFreq[i] = (i + 1) * (0.8 + _rng.NextDouble() * 0.9);
-            _driftPhase[i] = _rng.NextDouble() * Math.PI * 2;
-            _driftAmp[i] = 0.35 / (i + 1) * (0.6 + _rng.NextDouble() * 0.8);
-        }
-    }
-
     Flake NewFlake(double w, double h, bool anywhere, double windPx)
     {
         double r = _rng.NextDouble();
@@ -171,11 +153,6 @@ internal sealed class SnowLayer
         double snow = weather.Snow, blizzard = weather.Blizzard;
         _time += dt;
 
-        // 积雪：下雪时慢慢堆起来（上限随雪量），停了以后慢慢化掉
-        double accumTarget = snow * (0.45 + 0.55 * blizzard);
-        if (snow > 0.01 && _accum < accumTarget) _accum = Math.Min(accumTarget, _accum + dt * snow * 0.012);
-        else if (_accum > accumTarget) _accum = Math.Max(accumTarget, _accum - dt * 0.006);
-
         int target = (int)(Math.Pow(snow, 1.2) * MaxFlakes);
         double wind = weather.Wind, gust = weather.Gust;
         // 横向风速（px/s）。暴雪的风大，但雪花依然是一片片柔和的雪，不拉成线
@@ -190,7 +167,7 @@ internal sealed class SnowLayer
         if (_active < target) _active = Math.Min(target, _active + (int)(dt * 40) + 1);
         else if (_active > target) _active = Math.Max(target, _active - (int)(dt * 80) - 1);
 
-        if (snow <= 0.001 && _accum <= 0.001 && _active == 0) return;
+        if (snow <= 0.001 && _active == 0) return;
 
         // ---- 天色：雪天微微发灰发冷，暴雪白茫茫 ----
         double overcast = snow * 0.12;
@@ -280,42 +257,6 @@ internal sealed class SnowLayer
             dc.DrawRectangle(GroundMist, null, new Rect(0, h * 0.55, w, h * 0.45));
             dc.Pop();
         }
-
-        // ---- 积雪 ----
-        if (_accum > 0) DrawSnowBank(dc, w, h, k);
-    }
-
-    void DrawSnowBank(DrawingContext dc, double w, double h, double k)
-    {
-        // 积雪很薄时不要画出零点几像素高的多边形（WPF 原生曲面细分对近乎退化的几何很脆弱），
-        // 保持至少几像素高，用透明度淡入淡出
-        double realH = 70 * k * _accum;
-        double maxH = Math.Max(realH, 6 * k);
-        double fade = Math.Clamp(realH / (6 * k), 0, 1);
-        if (fade < 0.02) return;
-        var geo = new StreamGeometry();
-        using (var c = geo.Open())
-        {
-            c.BeginFigure(new Point(0, h + 2), true, true);
-            const int steps = 96;
-            var pts = new List<Point>(steps + 1);
-            for (int i = 0; i <= steps; i++)
-            {
-                double x = w * i / steps;
-                double u = (double)i / steps * Math.PI * 2;
-                double p = 0.62;
-                for (int j = 0; j < 5; j++) p += _driftAmp[j] * Math.Sin(u * _driftFreq[j] + _driftPhase[j]);
-                // 两边角落堆得更厚
-                double corner = Math.Pow(Math.Abs((double)i / steps - 0.5) * 2, 3) * 0.6;
-                pts.Add(new Point(x, h - maxH * Math.Max(0.15, p + corner)));
-            }
-            c.PolyLineTo(pts, true, true);
-            c.LineTo(new Point(w, h + 2), true, false);
-        }
-        geo.Freeze();
-        dc.PushOpacity(fade);
-        dc.DrawGeometry(SnowBank, null, geo);
-        dc.Pop();
     }
 
     static Brush Frozen(Brush b) { b.Freeze(); return b; }

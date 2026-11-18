@@ -12,6 +12,25 @@ public enum WeatherMode { Off, Rain, Storm, LightSnow, Snow, Blizzard, Tornado }
 /// <summary>通知边缘特效的样式，随天气变化。</summary>
 public enum EdgeStyle { Glow, StormGlow, Frost, Leaves }
 
+/// <summary>
+/// 边缘特效按发通知的应用换颜色：微信蓝绿、Claude 橙、ChatGPT / Codex 紫；其余应用用天气本来的颜色
+/// （晴雨是紫蓝粉流光，下雪是白色霜雾）。
+/// </summary>
+public enum EdgeTint { Default, WeChat, Claude, Gpt }
+
+public static class EdgeTints
+{
+    /// <summary>按通知里的应用名和 AppUserModelId 认出是哪个应用。</summary>
+    public static EdgeTint FromApp(string name, string appId)
+    {
+        string s = ((name ?? "") + "|" + (appId ?? "")).ToLowerInvariant();
+        if (s.Contains("微信") || s.Contains("wechat") || s.Contains("weixin")) return EdgeTint.WeChat;
+        if (s.Contains("claude") || s.Contains("anthropic")) return EdgeTint.Claude;
+        if (s.Contains("chatgpt") || s.Contains("openai") || s.Contains("codex")) return EdgeTint.Gpt;
+        return EdgeTint.Default;
+    }
+}
+
 public static class WeatherModes
 {
     /// <summary>菜单和按钮循环的顺序。</summary>
